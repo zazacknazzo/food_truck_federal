@@ -1,0 +1,642 @@
+{
+  "moeda": "BRL",
+  "unidade_preco": "centavos",
+  "status": "cardapio_fonte_2026_precos_a_confirmar",
+  "categorias": [
+    {
+      "id": "dogoes",
+      "nome": "Dogões"
+    },
+    {
+      "id": "hamburgueres",
+      "nome": "Hambúrgueres"
+    },
+    {
+      "id": "porcoes",
+      "nome": "Porções"
+    },
+    {
+      "id": "bebidas",
+      "nome": "Bebidas"
+    },
+    {
+      "id": "complementos",
+      "nome": "Complementos"
+    }
+  ],
+  "produtos": [
+    {
+      "id": "dog-simples",
+      "nome": "Dog Simples",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, pão, catchup, mostarda, maionese, batata palha e purê.",
+      "preco_centavos": 1090,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1090
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1150
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-completo",
+      "nome": "Dog Completo",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, pão, catchup, mostarda, maionese, milho, ervilha, purê, batata palha, requeijão e cheddar.",
+      "preco_centavos": 1290,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1290
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1350
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-4-queijos",
+      "nome": "Dog 4 Queijos",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, requeijão, cheddar, parmesão, mussarela, batata palha e purê.",
+      "preco_centavos": 1390,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1390
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1450
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-4-queijos-bacon",
+      "nome": "Dog 4 Queijos Bacon",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, requeijão, cheddar, parmesão, mussarela, bacon, batata palha e purê.",
+      "preco_centavos": 1890,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1890
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1950
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-especial-1",
+      "nome": "Dog Especial 1",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, catchup, mostarda, maionese, purê, milho, ervilha, cheddar, requeijão, parmesão, mussarela e batata palha.",
+      "preco_centavos": 1550,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1550
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1600
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-especial-calabresa",
+      "nome": "Dog Especial Calabresa",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, catchup, mostarda, maionese, milho, ervilha, purê, batata palha, cheddar, requeijão, mussarela, parmesão e calabresa.",
+      "preco_centavos": 1950,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1950
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 2000
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-especial-pepperoni",
+      "nome": "Dog Especial Pepperoni",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, catchup, maionese, mostarda, milho, ervilha, cheddar, requeijão, parmesão, mussarela, pepperoni e batata palha.",
+      "preco_centavos": 1950,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1950
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 2000
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-especial-egg",
+      "nome": "Dogão Especial Egg",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, catchup, mussarela, mostarda, maionese, purê, milho, ervilha, cheddar, requeijão, parmesão, batata palha e ovo.",
+      "preco_centavos": 1750,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 1750
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 1800
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "dog-especial-bacon",
+      "nome": "Dog Especial Bacon",
+      "categoria": "dogoes",
+      "descricao_fonte": "Prensado ou sem prensar, catchup, maionese, mostarda, purê, milho, ervilha, cheddar, requeijão, parmesão, mussarela, bacon e batata palha.",
+      "preco_centavos": 2250,
+      "variantes": [
+        {
+          "id": "1-salsicha",
+          "rotulo": "Uma salsicha",
+          "preco_centavos": 2250
+        },
+        {
+          "id": "2-salsichas",
+          "rotulo": "Duas salsichas",
+          "preco_centavos": 2290
+        }
+      ],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 1",
+      "observacoes": [
+        "Prensado ou sem prensar"
+      ]
+    },
+    {
+      "id": "hamburguer",
+      "nome": "Hambúrguer",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, hambúrguer e maionese especial.",
+      "preco_centavos": 1200,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-burguer",
+      "nome": "X Burguer",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, hambúrguer, queijo e maionese especial.",
+      "preco_centavos": 1300,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-burguer-egg",
+      "nome": "X Burguer Egg",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, um hambúrguer 90 g, mussarela e ovo.",
+      "preco_centavos": 1500,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-1",
+      "nome": "X Salada 1",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, um hambúrguer, alface, tomate, queijo e maionese especial.",
+      "preco_centavos": 1500,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-2",
+      "nome": "X Salada 2",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, dois hambúrgueres, alface, tomate, queijo e maionese especial.",
+      "preco_centavos": 1800,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-egg",
+      "nome": "X Salada Egg",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, dois hambúrgueres, alface, tomate, maionese especial e ovo.",
+      "preco_centavos": 2000,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-bacon",
+      "nome": "X Salada Bacon",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, dois hambúrgueres, alface, tomate, queijo, bacon e maionese especial.",
+      "preco_centavos": 2250,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-vegano",
+      "nome": "X Salada Vegano",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, hambúrguer de grão-de-bico com beterraba, alface e tomate.",
+      "preco_centavos": 1600,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-salada-vegetariano",
+      "nome": "X Salada Vegetariano",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, hambúrguer de grão-de-bico com beterraba, queijo, maionese especial, alface e tomate.",
+      "preco_centavos": 1800,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "x-tudo",
+      "nome": "X Tudo",
+      "categoria": "hamburgueres",
+      "descricao_fonte": "Pão de hambúrguer, dois hambúrgueres de 90 g, calabresa, bacon, ovo, maionese especial, mussarela, alface e tomate.",
+      "preco_centavos": 2990,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "batata-frita-completa",
+      "nome": "Batata Frita Completa",
+      "categoria": "porcoes",
+      "descricao_fonte": "Catchup, mostarda, maionese, requeijão e cheddar.",
+      "preco_centavos": 1700,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "nuggets",
+      "nome": "Nuggets (10 unidades)",
+      "categoria": "porcoes",
+      "descricao_fonte": "10 nuggets, acompanha um molho à escolha.",
+      "preco_centavos": 1400,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "refrigerante-lata",
+      "nome": "Refrigerante (lata)",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 600,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "dolly",
+      "nome": "Dolly",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 350,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "sprit-zero",
+      "nome": "Sprit Zero",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 700,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": [
+        "Grafia no cardápio: Sprit Zero; confirmar marca/nome."
+      ]
+    },
+    {
+      "id": "agua",
+      "nome": "Água",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 300,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "agua-com-gas",
+      "nome": "Água com gás",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 400,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "milk-shake-acai-400ml",
+      "nome": "Milk-shake açaí 400 ml",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 1700,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "suco-natural-agua",
+      "nome": "Suco natural com água",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 800,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "suco-com-leite",
+      "nome": "Suco com leite",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 1100,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "guaraviton",
+      "nome": "Guaraviton",
+      "categoria": "bebidas",
+      "descricao_fonte": "",
+      "preco_centavos": 600,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "molho-verde",
+      "nome": "Molho verde especial",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 300,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "cheddar",
+      "nome": "Cheddar extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 300,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "mussarela",
+      "nome": "Mussarela extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 400,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "pepperoni",
+      "nome": "Pepperoni extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 500,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "calabresa",
+      "nome": "Calabresa extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 500,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "bacon",
+      "nome": "Bacon extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 600,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "ovo",
+      "nome": "Ovo",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 300,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    },
+    {
+      "id": "hamburguer-extra",
+      "nome": "Hambúrguer extra",
+      "categoria": "complementos",
+      "descricao_fonte": "",
+      "preco_centavos": 500,
+      "variantes": [],
+      "foto": null,
+      "disponivel": null,
+      "revisar_com_proprietaria": true,
+      "fonte": "ok.pdf — pág. 2",
+      "observacoes": []
+    }
+  ]
+}
