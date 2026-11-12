@@ -89,8 +89,8 @@ export function Campaign({ standalone = false }: { standalone?: boolean }) {
     </div>
     <div className="campaign-media"><img src="/media/dogao-original.webp" alt="Dogão da Kombi fotografado pela equipe" loading="lazy" width="1280" height="960" /></div>
     {standalone && published && <div className="campaign-download">
-      <img src="/media/qr-cardapio.png" width="92" height="92" alt="QR code para o cardápio do site privado" />
-      <div><strong>Peças da campanha</strong><p>O QR leva ao cardápio e exige acesso ao site.</p><div className="button-row"><a href="/media/cartaz-federal.png" download>Baixar cartaz <ArrowRight size={15} /></a><a href="/media/story-federal.png" download>Baixar story <ArrowRight size={15} /></a></div></div>
+      <img src="/media/qr-cardapio.png" width="92" height="92" alt="QR code para o cardápio do Food Truck Federal" />
+      <div><strong>Peças da campanha</strong><p>O QR leva ao cardápio da versão demonstrativa.</p><div className="button-row"><a href="/media/cartaz-federal.png" download>Baixar cartaz <ArrowRight size={15} /></a><a href="/media/story-federal.png" download>Baixar story <ArrowRight size={15} /></a></div></div>
     </div>}
   </section>;
 }

@@ -1,4 +1,4 @@
-import type { Order } from "./federal";
+import { originalProducts, type CartLine, type Order } from "./federal";
 
 export async function api<T>(path: string, body?: Record<string, unknown> | File, signal?: AbortSignal): Promise<T> {
   const headers = body ? { "Content-Type": body instanceof File ? body.type : "application/json" } : undefined;
@@ -23,10 +23,31 @@ export function writeLocal(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Browser storage may be disabled. */ }
 }
 
+export function readCart(key: string): CartLine[] {
+  const cart = readLocal<unknown>(key, []);
+  if (!Array.isArray(cart)) return [];
+  return cart.filter((line): line is CartLine => line && typeof line.key === "string" && typeof line.product === "string"
+    && originalProducts.some(p => p.id === line.product)
+    && typeof line.variant === "string" && typeof line.press === "string" && typeof line.note === "string"
+    && Array.isArray(line.extras) && line.extras.every((extra: unknown) => typeof extra === "string")
+    && Number.isInteger(line.quantity) && line.quantity >= 1 && line.quantity <= 15).slice(0, 30);
+}
+
+export async function checkoutRequestKey(draft: Record<string, unknown>) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(draft)));
+  return Array.from(new Uint8Array(hash).slice(0, 16), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export type RememberedOrder = { tracking: string; id: string; created_at: number };
+export function rememberedOrders(): RememberedOrder[] {
+  const list = readLocal<unknown>("federal-pedidos", []);
+  if (!Array.isArray(list)) return [];
+  return list.filter((item): item is RememberedOrder => item && typeof item.tracking === "string"
+    && /^[a-f0-9]{32}$/.test(item.tracking) && typeof item.id === "string" && Number.isFinite(item.created_at));
+}
 export function rememberOrder(order: Order) {
   if (!order.tracking) return;
-  const list = readLocal<RememberedOrder[]>("federal-pedidos", []);
+  const list = rememberedOrders();
   const record = { tracking: order.tracking, id: order.id, created_at: order.created_at };
   writeLocal("federal-pedidos", [record, ...list.filter(item => item.tracking !== record.tracking)].slice(0, 25));
 }

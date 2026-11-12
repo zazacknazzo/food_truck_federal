@@ -1,20 +1,50 @@
 import { env } from "cloudflare:workers";
 import {
   type CartLine, type Config, type Item, type Metrics, type Order, type Payment,
-  type Product, type Slot, type Stage, type Submission,
+  type Product, type PublishedSubmission, type Slot, type Stage, type Submission,
   dateKey, defaultConfig, extrasFor, originalProducts, payments, slotMs, students, time, zone,
 } from "./federal";
 
-type StoredOrder = Omit<Order, "tracking" | "code" | "items" | "events"> & {
+type StoredOrder = Omit<Order, "demo" | "tracking" | "code" | "items" | "events"> & {
   tracking: string;
   code: string;
   request_key: string;
+  request_hash: string | null;
   items: string;
   events: string;
 };
 
 export class Problem extends Error {
   constructor(public status: number, message: string) { super(message); }
+}
+
+export async function readBoundedBody(request: Request, limit: number, message: string) {
+  if (Number(request.headers.get("content-length")) > limit) throw new Problem(413, message);
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel().catch(() => {});
+        throw new Problem(413, message);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 export function database() {
@@ -25,7 +55,8 @@ export function database() {
 export function isOperator(headers: Headers) {
   const email = headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
   const permitted = (env.FEDERAL_OPERATORS ?? "").toLowerCase().split(/[;,\n]/).map(entry => entry.trim()).filter(Boolean);
-  return Boolean(headers.get("oai-authenticated-user-id") && email && permitted.includes(email));
+  // Sites dispatch supplies the authenticated headers. The Worker has no public origin of its own.
+  return Boolean(headers.get("oai-authenticated-user-id")?.trim() && email && permitted.includes(email));
 }
 
 export async function storeContext() {
@@ -84,10 +115,10 @@ export async function upcomingSlots(config: Config, now = Date.now()) {
 }
 
 function orderView(row: StoredOrder, operator = false): Order {
-  const { items, tracking, code, events, request_key: _requestKey, ...rest } = row;
-  const order: Order = { ...rest, items: JSON.parse(items) };
-  if (operator) return { ...order, events: JSON.parse(events) };
-  return { ...order, tracking, ...(row.payment === "aprovado" ? { code } : {}) };
+  const { items, tracking, code, events, campaign, request_key: _requestKey, request_hash: _requestHash, ...rest } = row;
+  const order: Order = { ...rest, demo: true, items: JSON.parse(items) };
+  if (operator) return { ...order, campaign, events: JSON.parse(events) };
+  return { ...order, tracking, ...(row.payment === "aprovado" && row.stage !== "retirado" ? { code } : {}) };
 }
 
 const randomToken = () => crypto.randomUUID().replaceAll("-", "");
@@ -130,10 +161,10 @@ async function expireOrders(now: number, token?: string) {
 
 export async function createOrder(body: Record<string, unknown>) {
   const db = database();
-  const requestKey = textField(body.requestKey, 80);
-  if (!/^[a-f0-9-]{32,40}$/i.test(requestKey)) throw new Problem(400, "Abra novamente o checkout para continuar.");
-  const repeated = await db.prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey).first<StoredOrder>();
-  if (repeated) return getOrder(repeated.tracking);
+  const requestKey = textField(body.requestKey, 80).toLowerCase();
+  if (!/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/.test(requestKey)) {
+    throw new Problem(400, "Abra novamente o checkout para continuar.");
+  }
   const customer = textField(body.customer, 60);
   if (customer.length < 2) throw new Problem(400, "Informe um nome ou apelido para a retirada.");
   const method = body.method;
@@ -142,6 +173,31 @@ export async function createOrder(body: Record<string, unknown>) {
   if (payment !== "aprovado" && payment !== "pendente" && payment !== "recusado" && payment !== "expirado") throw new Problem(400, "Escolha um resultado para simular.");
   const pickup = body.pickup;
   if (pickup !== "imediata" && pickup !== "agendada") throw new Problem(400, "Escolha uma modalidade de retirada.");
+  const requestedSlot = pickup === "agendada" ? body.slot : null;
+  if (pickup === "agendada" && (typeof requestedSlot !== "number" || !Number.isSafeInteger(requestedSlot) || requestedSlot % slotMs !== 0)) {
+    throw new Problem(400, "Escolha uma janela válida de 15 minutos.");
+  }
+  if (!Number.isSafeInteger(body.total) || (body.total as number) < 0) throw new Problem(400, "Confira o valor do pedido.");
+  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 30) throw new Problem(400, "Use de 1 a 30 itens na sacola.");
+  const campaign = textField(body.campaign, 64).replace(/[^a-z0-9_-]/gi, "") || null;
+  const lines = body.items.map((line: CartLine) => [
+    line?.product, line?.variant, line?.press, line?.extras, line?.quantity, textField(line?.note, 180),
+  ]);
+  const payload = JSON.stringify([customer, method, payment, pickup, requestedSlot, body.total, campaign, lines]);
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  const requestHash = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+  function checkReplay(row: StoredOrder) {
+    // Older records had no request hash. Verify their immutable receipt fields.
+    const same = row.request_hash ? row.request_hash === requestHash
+      : row.customer === customer && row.method === method && row.pickup === pickup && row.total === body.total
+        && (pickup === "imediata" || row.slot === requestedSlot);
+    if (!same) throw new Problem(409, "Este envio já foi usado com outros dados. Confira a sacola.");
+    return getOrder(row.tracking);
+  }
+  const findRequest = db.prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey);
+  const repeated = await findRequest.first<StoredOrder>();
+  if (repeated) return checkReplay(repeated);
+
   await ensureConfig();
   const { config, revision, products } = await storeContext();
   if (config.paused) throw new Problem(409, "A Kombi pausou novos pedidos.");
@@ -153,32 +209,41 @@ export async function createOrder(body: Record<string, unknown>) {
   const slot = pickup === "imediata"
     ? available.find(x => x.remaining > 0)
     : available.find(x => x.start === body.slot && x.remaining > 0);
-  if (!slot) throw new Problem(409, "Essa janela está indisponível. Escolha outro horário.");
+  if (!slot) {
+    const recorded = await findRequest.first<StoredOrder>();
+    if (recorded) return checkReplay(recorded);
+    throw new Problem(409, "Essa janela está indisponível. Escolha outro horário.");
+  }
   const id = crypto.randomUUID();
   const tracking = randomToken();
   const code = pickupCode();
   const expiresAt = payment === "pendente" ? now + 5 * 60_000 : null;
   const stage: Stage = payment === "recusado" || payment === "expirado" ? "cancelado" : "recebido";
-  const campaign = textField(body.campaign, 64).replace(/[^a-z0-9_-]/gi, "") || null;
   const events = JSON.stringify([{ label: `Pagamento demonstrativo · ${payments[payment]}`, at: now }]);
   // D1 executes the capacity check and the insert in a single SQLite statement.
   await db.prepare(`INSERT INTO orders
-    (id, tracking, request_key, code, customer, slot, pickup, items, total, method, payment, stage, campaign, created_at, expires_at, events)
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    (id, tracking, request_key, request_hash, code, customer, slot, pickup, items, total, method, payment, stage, campaign, created_at, expires_at, events)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE (SELECT revision FROM operation WHERE id=1) = ?
       AND (SELECT COUNT(*) FROM orders WHERE slot=? AND ${occupancyWhere}) < ?
     ON CONFLICT(request_key) DO NOTHING`)
-    .bind(id, tracking, requestKey, code, customer, slot.start, pickup, JSON.stringify(items), total, method, payment, stage, campaign, now, expiresAt, events, revision, slot.start, now, slot.capacity).run();
-  const row = await db.prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey).first<StoredOrder>();
+    .bind(id, tracking, requestKey, requestHash, code, customer, slot.start, pickup, JSON.stringify(items), total, method, payment, stage, campaign, now, expiresAt, events, revision, slot.start, now, slot.capacity).run();
+  const row = await findRequest.first<StoredOrder>();
   if (!row) throw new Problem(409, "A operação mudou ou a última vaga foi ocupada. Confira os horários e tente novamente.");
-  return orderView(row);
+  return row.id === id ? orderView(row) : checkReplay(row);
 }
 
 export async function getOrder(token: string) {
   if (!/^[a-f0-9]{32}$/.test(token)) throw new Problem(404, "Pedido não encontrado. Confira o link de acompanhamento.");
-  await expireOrders(Date.now(), token);
-  const row = await database().prepare("SELECT * FROM orders WHERE tracking=?").bind(token).first<StoredOrder>();
+  const statement = database().prepare("SELECT * FROM orders WHERE tracking=?").bind(token);
+  const row = await statement.first<StoredOrder>();
   if (!row) throw new Problem(404, "Pedido não encontrado. Confira o link de acompanhamento.");
+  const now = Date.now();
+  if (row.payment === "pendente" && row.expires_at !== null && row.expires_at <= now) {
+    await expireOrders(now, token);
+    const current = await statement.first<StoredOrder>();
+    if (current) return orderView(current);
+  }
   return orderView(row);
 }
 
@@ -286,6 +351,22 @@ function photoPath(value: unknown) {
   throw new Problem(400, "Envie um arquivo de imagem pelo painel.");
 }
 
+function photos() {
+  if (!env.BUCKET) throw new Problem(503, "O armazenamento de imagens está indisponível.");
+  return env.BUCKET;
+}
+
+function findPhoto(path: string | null) {
+  return path ? photos().head(`photos/${path.split("/").at(-1)}`) : Promise.resolve(null);
+}
+
+async function existingPhoto(value: unknown) {
+  const path = photoPath(value);
+  const object = await findPhoto(path);
+  if (path && !object) throw new Problem(400, "A foto enviada não está disponível. Envie o arquivo novamente.");
+  return { path, object };
+}
+
 function cents(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 100_000) throw new Problem(400, "Informe um preço válido em reais.");
   return value;
@@ -313,10 +394,11 @@ export async function updateProduct(id: string, body: Record<string, unknown>) {
   if (!nome) throw new Problem(400, "Informe um nome para o produto.");
   const prices = body.variantPrices;
   const variantes = source.variantes.map((variant, i) => ({ ...variant, preco_centavos: cents(Array.isArray(prices) ? prices[i] : undefined) }));
+  const photo = body.foto === undefined ? {} : { foto: (await existingPhoto(body.foto)).path };
   await changeProduct(id, {
     nome, descricao_fonte: textField(body.descricao_fonte, 650),
     preco_centavos: variantes[0]?.preco_centavos ?? cents(body.preco_centavos),
-    variantes, foto: photoPath(body.foto),
+    variantes, ...photo,
   });
   return { ok: true };
 }
@@ -326,31 +408,47 @@ export async function getSubmissions(): Promise<Submission[]> {
   return students.map(s => results.find(r => r.student === s.student) ?? { ...s, original: null, edited: null });
 }
 
+export async function getPublishedSubmissions(): Promise<PublishedSubmission[]> {
+  const submissions = await getSubmissions();
+  return Promise.all(submissions.map(async item => {
+    try {
+      const [original, edited] = await Promise.all([findPhoto(item.original), findPhoto(item.edited)]);
+      if (original && edited && original.etag === edited.etag) {
+        return { ...item, edited: null, photoStatus: "revisar" };
+      }
+      const missing = (item.original && !original) || (item.edited && !edited);
+      return {
+        ...item, original: original ? item.original : null, edited: edited ? item.edited : null,
+        photoStatus: original && edited ? "publicado" : missing ? "indisponivel" : "pendente",
+      };
+    } catch {
+      return { ...item, original: null, edited: null, photoStatus: "indisponivel" };
+    }
+  }));
+}
+
 export async function updateSubmission(student: string, body: Record<string, unknown>) {
   if (!students.some(s => s.student === student)) throw new Problem(404, "Integrante não encontrado.");
   if (!originalProducts.some(p => p.id === body.product)) throw new Problem(400, "Escolha um produto do catálogo.");
-  const original = photoPath(body.original);
-  const edited = photoPath(body.edited);
-  if (original && original === edited) throw new Problem(400, "Selecione dois arquivos diferentes para o par.");
+  const [original, edited] = await Promise.all([existingPhoto(body.original), existingPhoto(body.edited)]);
+  if (original.object && edited.object && original.object.etag === edited.object.etag) {
+    throw new Problem(400, "A foto original e a versão editada precisam ser arquivos diferentes.");
+  }
   await database().prepare(`INSERT INTO submissions (student, product, original, edited) VALUES (?, ?, ?, ?)
     ON CONFLICT(student) DO UPDATE SET product=excluded.product, original=excluded.original, edited=excluded.edited`)
-    .bind(student, body.product, original, edited).run();
+    .bind(student, body.product, original.path, edited.path).run();
   return { ok: true };
 }
 
 export async function uploadPhoto(request: Request) {
-  const bucket = env.BUCKET;
-  if (!bucket) throw new Problem(503, "O armazenamento de imagens está indisponível.");
+  const bucket = photos();
   const contentType = request.headers.get("content-type") ?? "";
   if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) throw new Problem(400, "Use uma imagem JPG, PNG ou WebP.");
-  const limit = 4 * 1024 * 1024;
-  if (Number(request.headers.get("content-length")) > limit) throw new Problem(413, "A imagem precisa ter até 4 MB.");
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.length > limit) throw new Problem(413, "A imagem precisa ter até 4 MB.");
+  const bytes = await readBoundedBody(request, 4 * 1024 * 1024, "A imagem precisa ter até 4 MB.");
   const ascii = (offset: number, length: number) => String.fromCharCode(...bytes.slice(offset, offset + length));
   const valid = bytes.length > 16 && (
     (contentType === "image/jpeg" && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) ||
-    (contentType === "image/png" && bytes[0] === 137 && ascii(1, 3) === "PNG") ||
+    (contentType === "image/png" && ascii(0, 8) === "\x89PNG\r\n\x1a\n") ||
     (contentType === "image/webp" && ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP")
   );
   if (!valid) throw new Problem(400, "O arquivo não corresponde ao formato da imagem.");
@@ -361,7 +459,7 @@ export async function uploadPhoto(request: Request) {
 
 export async function readPhoto(id: string) {
   if (!/^[a-f0-9]{32}$/.test(id)) throw new Problem(404, "Imagem não encontrada.");
-  const object = await env.BUCKET?.get(`photos/${id}`);
+  const object = await photos().get(`photos/${id}`);
   if (!object) throw new Problem(404, "Imagem não encontrada.");
   return new Response(object.body, {
     headers: { "Content-Type": object.httpMetadata?.contentType ?? "application/octet-stream", "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" },

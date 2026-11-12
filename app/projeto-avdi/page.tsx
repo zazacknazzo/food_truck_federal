@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ArrowLeft, Camera, ImagePlus, Palette } from "lucide-react";
-import { originalProducts, students, type Submission } from "@/lib/federal";
-import { getSubmissions } from "@/lib/federal-server";
+import { originalProducts, students, type PublishedSubmission } from "@/lib/federal";
+import { getPublishedSubmissions } from "@/lib/federal-server";
 import { Campaign, SiteFooter, SiteHeader } from "../site-ui";
 
 export const metadata: Metadata = { title: "Projeto AVDI", description: "Anúncio, escolhas de design e trabalhos individuais do Food Truck Federal." };
@@ -17,9 +17,10 @@ const choices = [
 ];
 
 export default async function Page() {
-  let submissions: Submission[];
-  try { submissions = await getSubmissions(); }
-  catch { submissions = students.map(s => ({ ...s, original: null, edited: null })); }
+  let submissions: PublishedSubmission[];
+  try { submissions = await getPublishedSubmissions(); }
+  catch { submissions = students.map(s => ({ ...s, original: null, edited: null, photoStatus: "indisponivel" })); }
+  const statusLabels = { pendente: "Par pendente", publicado: "Par publicado", indisponivel: "Fotos indisponíveis", revisar: "Par em revisão" };
   return <><SiteHeader /><main className="container page-shell avdi">
     <a className="back-link" href="/"><ArrowLeft size={17} /> Voltar ao site comercial</a>
     <section className="avdi-intro">
@@ -37,14 +38,14 @@ export default async function Page() {
 
     <section className="avdi-section" aria-labelledby="avdi-campanha"><div className="section-title"><span className="eyebrow">Trabalho em grupo</span><h2 id="avdi-campanha">Anúncio publicitário</h2></div><Campaign standalone /></section>
 
-    <section className="avdi-section" aria-labelledby="individual"><div className="section-title"><span className="eyebrow">Trabalhos individuais</span><h2 id="individual">Quatro produtos, quatro olhares.</h2><p>Os produtos abaixo são propostas de atribuição. A foto original e a edição por IA do mesmo item podem ser publicadas pelo painel autorizado.</p></div>
+    <section className="avdi-section" aria-labelledby="individual"><div className="section-title"><span className="eyebrow">Trabalhos individuais</span><h2 id="individual">Quatro produtos, quatro olhares.</h2><p>Cada integrante tem um produto atribuído para a apresentação. A foto original e a edição por IA do mesmo item são publicadas pelo painel autorizado.</p></div>
       <div className="submission-grid">
         {submissions.map(item => {
           const product = originalProducts.find(p => p.id === item.product);
-          const complete = Boolean(item.original && item.edited);
+          const complete = item.photoStatus === "publicado";
           return <article className="panel submission" key={item.student}>
-            <div className="submission-head"><div><span className="eyebrow">{item.student}</span><h3>{product?.nome}</h3></div><span className={`state-badge ${complete ? "stage-retirado" : "stage-recebido"}`}>{complete ? "Par publicado" : "Par pendente"}</span></div>
-            <div className="pair-grid"><PhotoSide src={item.original} name="Foto original" /><PhotoSide src={item.edited} name="Versão editada por IA" /></div>
+            <div className="submission-head"><div><span className="eyebrow">{item.student}</span><h3>{product?.nome}</h3></div><span className={`state-badge ${complete ? "stage-retirado" : "stage-recebido"}`}>{statusLabels[item.photoStatus]}</span></div>
+            <div className="pair-grid"><PhotoSide src={item.original} name="Foto original" product={product?.nome} /><PhotoSide src={item.edited} name="Versão editada por IA" product={product?.nome} /></div>
           </article>;
         })}
       </div>
@@ -55,10 +56,10 @@ export default async function Page() {
   </main><SiteFooter /></>;
 }
 
-function PhotoSide({ src, name }: { src: string | null; name: string }) {
+function PhotoSide({ src, name, product }: { src: string | null; name: string; product?: string }) {
   const Icon = name === "Foto original" ? Camera : ImagePlus;
   return <figure className="photo-side">
-    {src ? <img src={src} alt={name} loading="lazy" /> : <div className="photo-missing"><Icon size={24} /><span>Foto pendente</span></div>}
+    {src ? <img src={src} alt={product ? `${name} de ${product}` : name} loading="lazy" /> : <div className="photo-missing"><Icon size={24} /><span>Foto pendente</span></div>}
     <figcaption>{name}</figcaption>
   </figure>;
 }

@@ -82,6 +82,7 @@ export type Item = {
   total: number;
 };
 export type Order = {
+  demo: true;
   id: string;
   tracking?: string;
   code?: string;
@@ -93,7 +94,7 @@ export type Order = {
   method: Method;
   payment: Payment;
   stage: Stage;
-  campaign: string | null;
+  campaign?: string | null;
   created_at: number;
   expires_at: number | null;
   started_at: number | null;
@@ -102,6 +103,7 @@ export type Order = {
   events?: { label: string; at: number }[];
 };
 export type Submission = { student: string; product: string; original: string | null; edited: string | null };
+export type PublishedSubmission = Submission & { photoStatus: "pendente" | "publicado" | "indisponivel" | "revisar" };
 export type Metrics = {
   count: number;
   approved: number;

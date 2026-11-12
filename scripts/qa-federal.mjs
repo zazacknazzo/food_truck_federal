@@ -1,0 +1,184 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+const { Miniflare } = createRequire(resolve("package.json"))("miniflare");
+const root=resolve("dist/server");
+const chunks=(await readdir(root,{recursive:true})).filter(f=>f.endsWith(".js")&&f!=="index.js");
+const sandbox = await mkdtemp(join(tmpdir(), "federal-qa-"));
+const options = {
+  modules: ["index.js", ...chunks].map(path=>({type:"ESModule",path:resolve(root,path)})), modulesRoot:root,
+  compatibilityDate: "2026-05-15", compatibilityFlags: ["nodejs_compat"],
+  d1Databases: ["DB"], d1Persist: join(sandbox, "d1"), r2Buckets: ["BUCKET"], bindings: { FEDERAL_OPERATORS: "qa@sites.test" },
+};
+const worker = new Miniflare(options);
+const operator = { "oai-authenticated-user-id": "operator", "oai-authenticated-user-email": "qa@sites.test" };
+let completedToken;
+const viewer = { "oai-authenticated-user-id": "viewer", "oai-authenticated-user-email": "viewer@sites.test" };
+
+async function raw(path, body, headers = {}, type = "application/json", target = worker) {
+  return target.dispatchFetch("https://federal.qa/api/"+path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { ...headers, ...(body !== undefined ? { "content-type": type } : {}) },
+    ...(body !== undefined ? { body: type === "application/json" ? JSON.stringify(body) : body } : {}),
+  });
+}
+async function call(path, body, headers, status = 200) {
+  const response = await raw(path, body, headers);
+  const data = await response.json();
+  assert.equal(response.status, status, path+" · "+JSON.stringify(data));
+  return data;
+}
+function order(overrides = {}) {
+  return { customer: "Teste Kombi", requestKey: crypto.randomUUID(), pickup: "imediata", scenario: "aprovado",
+    method: "Pix", campaign: "federal-avdi", total: 3900, items: [{ product: "dog-completo", variant: "2-salsichas",
+    press: "Prensado", extras: ["bacon"], quantity: 2, note: "Teste" }], ...overrides };
+}
+try {
+  const db = await worker.getD1Database("DB");
+  const migrations = (await readdir("drizzle")).filter(file => file.endsWith(".sql")).sort();
+  async function migrate(file) {
+    const sql = await readFile(`drizzle/${file}`, "utf8");
+    await db.batch(sql.split("--> statement-breakpoint").map(s => s.trim()).filter(Boolean).map(s => db.prepare(s)));
+  }
+  await migrate(migrations[0]);
+  const legacy = "1234567890abcdef1234567890abcdef";
+  await db.prepare(`INSERT INTO orders
+    (id,tracking,request_key,code,customer,slot,pickup,items,total,method,payment,stage,created_at,events)
+    VALUES ('legacy',?,'legacy-request','ABCDE','QA histórico',0,'imediata','[]',0,'Pix','recusado','cancelado',0,'[]')`).bind(legacy).run();
+  for (const file of migrations.slice(1)) await migrate(file);
+  assert.equal((await call("pedido/"+legacy)).payment, "recusado");
+  assert.equal((await call("avdi")).filter(item => item.photoStatus === "publicado").length, 0);
+  const catalog = await call("loja");
+  assert.equal(catalog.products.length, 38);
+  assert.deepEqual(catalog.products, JSON.parse(await readFile("lib/catalogo.json","utf8")).produtos);
+  const { slots } = await call("horarios");
+  assert.ok(slots.length > 50 && slots.every(s=>s.capacity===10 && s.start%900000===0));
+  await call("admin",undefined,{},403);
+  await call("admin/pausa",{paused:true},viewer,403);
+  await call("admin/pausa",{paused:true},{...operator,origin:"https://outro.federal.qa"},403);
+  await call("admin/pausa/falso/extra",{paused:true},operator,404);
+  await call("pedido",{extra:"a".repeat(61_000)},undefined,413);
+  const { config } = await call("admin",undefined,operator);
+  console.log("38 itens, preços, ingredientes, variantes, autorização e capacidade inicial");
+
+  const body = order();
+  const [a, duplicate] = await Promise.all([call("pedido",body),call("pedido",body)]);
+  assert.equal(a.id,duplicate.id); assert.equal(a.total,3900); assert.equal(a.items[0].unit,1950);
+  assert.match(a.code,/^[A-Z2-9]{5}$/);
+  assert.equal(a.demo, true);
+  assert.equal(a.campaign, undefined);
+  assert.equal(a.request_hash, undefined);
+  await call("pedido",{...body,customer:"Outro visitante"},undefined,409);
+  assert.equal((await raw("pedido/"+a.tracking)).headers.get("x-federal-mode"),"demo");
+  const queue = (await call("admin",undefined,operator)).orders;
+  assert.equal(queue.length,1); assert.equal(queue[0].code,undefined); assert.equal(queue[0].tracking,undefined);
+  await call("admin/pedido/"+a.id,{action:"ready"},operator,409);
+  await call("admin/pedido/"+a.id,{action:"start"},operator);
+  assert.equal((await call("pedido/"+a.tracking)).stage,"em_preparo");
+  await call("admin/pedido/"+a.id,{action:"ready"},operator);
+  assert.equal((await call("pedido/"+a.tracking)).stage,"pronto");
+  await call("admin/pedido/"+a.id,{action:"pickup",code:"00000"},operator,400);
+  await call("admin/pedido/"+a.id,{action:"pickup",code:a.code.toLowerCase()},operator);
+  const delivered = await call("pedido/"+a.tracking);
+  assert.equal(delivered.stage,"retirado");
+  completedToken = a.tracking;
+  assert.equal(delivered.code,undefined);
+  const {metrics, history} = await call("admin",undefined,operator);
+  assert.equal(metrics.value,3900); assert.equal(metrics.top[0].quantity,2); assert.equal(history[0].events.length,4);
+  await call("pedido/"+a.id,undefined,undefined,404);
+  console.log("Pedido idempotente, preparo, código incorreto bloqueado, retirada confirmada e métricas");
+
+  const capSlot=slots.find((s,i)=>i>6 && new Date(s.start).getUTCMinutes()!==45).start;
+  const clock=new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+  const date=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"});
+  const rule={date:date.format(capSlot),start:clock.format(capSlot),end:clock.format(capSlot+900000),capacity:1};
+  await call("admin/operacao",{...config,overrides:[rule]},operator);
+  const scheduled=(scenario)=>order({pickup:"agendada",slot:capSlot,scenario});
+  const sameSlot = scheduled("pendente");
+  const [firstHold, repeatedHold] = await Promise.all([call("pedido",sameSlot),call("pedido",sameSlot)]);
+  assert.equal(firstHold.id,repeatedHold.id);
+  assert.equal((await call("horarios")).slots.find(s=>s.start===capSlot).remaining,0);
+  await call("pagamento/"+firstHold.tracking,{action:"recusado"});
+  const race=await Promise.all([raw("pedido",scheduled("pendente")),raw("pedido",scheduled("pendente"))]);
+  assert.deepEqual(race.map(r=>r.status).sort(),[200,409]);
+  const winner=await race.find(r=>r.ok).json();
+  assert.equal(winner.slot,capSlot); assert.equal(winner.code,undefined);
+  assert.equal((await call("horarios")).slots.find(s=>s.start===capSlot).remaining,0);
+  await call("pagamento-demo/"+winner.tracking,{type:"payment.updated",data:{id:123}},undefined,400);
+  assert.equal((await call("pagamento-demo/"+winner.tracking,{mode:"demo",action:"aprovado"})).payment,"aprovado");
+  assert.equal((await call("horarios")).slots.find(s=>s.start===capSlot).remaining,0);
+  await call("admin/pedido/"+winner.id,{action:"cancel"},operator);
+  assert.equal((await call("pedido/"+winner.tracking)).payment,"reembolsado");
+  const hold=await call("pedido",scheduled("pendente"));
+  await db.prepare("UPDATE orders SET expires_at=? WHERE id=?").bind(Date.now()-1000,hold.id).run();
+  assert.equal((await call("horarios")).slots.find(s=>s.start===capSlot).remaining,1);
+  assert.equal((await call("pedido/"+hold.tracking)).payment,"expirado");
+  assert.equal((await call("pedido",scheduled("recusado"))).stage,"cancelado");
+  assert.equal((await call("pedido",scheduled("expirado"))).payment,"expirado");
+  await call("admin/operacao",{...config,overrides:[{...rule,capacity:0}]},operator);
+  assert.ok(!(await call("horarios")).slots.some(s=>s.start===capSlot));
+  console.log("Agenda, última vaga concorrente, reserva, aprovação, reembolso, recusa e expiração");
+
+  await call("admin/pausa",{paused:true},operator);
+  assert.equal((await call("horarios")).slots.length,0);
+  await call("pedido",order(),undefined,409);
+  await call("admin/pausa",{paused:false},operator);
+  await call("admin/produto/dog-completo",{action:"availability",disponivel:false},operator);
+  await call("pedido",order(),undefined,409);
+  const upload=async(file)=>{
+    const response=await raw("admin/upload",await readFile(file),operator,"image/webp");
+    assert.equal(response.status,200,await response.clone().text());
+    return (await response.json()).url;
+  };
+  const original=await upload("public/media/dogao-original.webp");
+  const edited=await upload("public/media/dogao-ia.webp");
+  const duplicatePhoto=await upload("public/media/dogao-original.webp");
+  await call("admin/avdi/Isaac",{product:"dog-completo",original,edited:duplicatePhoto},operator,400);
+  await call("admin/avdi/Isaac",{product:"dog-completo",original,edited:"/api/fotos/"+"0".repeat(32)},operator,400);
+  const invalidPhoto=await raw("admin/upload",new Uint8Array(64),operator,"image/png");
+  assert.equal(invalidPhoto.status,400);
+  const tooBig=await raw("admin/upload",new Uint8Array(4*1024*1024+1),operator,"image/png");
+  assert.equal(tooBig.status,413);
+  await call("admin/avdi/Isaac",{product:"dog-completo",original,edited:null},operator);
+  assert.equal((await call("avdi"))[0].photoStatus,"pendente");
+  await call("admin/produto/dog-completo",{action:"availability",disponivel:true},operator);
+  assert.equal((await raw(original.replace("/api/",""))).headers.get("content-type"),"image/webp");
+  await call("admin/produto/dog-completo",{nome:"Dog Completo",descricao_fonte:catalog.products[1].descricao_fonte,
+    disponivel:true,variantPrices:[1290,1450],foto:original},operator);
+  await call("pedido",order(),undefined,409);
+  assert.equal((await call("pedido",order({total:4100}))).total,4100);
+  await call("admin/avdi/Isaac",{product:"dog-completo",original,edited},operator);
+  const avdi=await call("avdi");
+  assert.equal(avdi.length,4); assert.equal(avdi[0].edited,edited);
+  assert.equal(avdi[0].photoStatus,"publicado");
+  assert.equal(avdi.filter(item=>item.photoStatus==="pendente").length,3);
+  console.log("Pausa, estoque, atualização de preço, upload R2 e publicação AVDI");
+} finally {
+  await worker.dispose();
+  if (!completedToken) await rm(sandbox, { recursive: true, force: true });
+}
+
+const resumed = new Miniflare(options);
+try {
+  const response = await raw("pedido/"+completedToken, undefined, {}, undefined, resumed);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).stage, "retirado");
+  console.log("Pedido lido do D1 após reiniciar o Worker");
+} finally {
+  await resumed.dispose();
+  await rm(sandbox, { recursive: true, force: true });
+}
+
+const withoutBindings = new Miniflare({ ...options, d1Databases: [], r2Buckets: [] });
+try {
+  const store = await raw("loja",undefined,{},undefined,withoutBindings);
+  assert.equal(store.status,503);
+  const upload = await raw("admin/upload",new Uint8Array(24),operator,"image/webp",withoutBindings);
+  assert.equal(upload.status,503);
+  const photo = await raw("fotos/"+"0".repeat(32),undefined,{},undefined,withoutBindings);
+  assert.equal(photo.status,503);
+  console.log("Falhas de D1 e R2 respondem 503 sem divulgar detalhes internos");
+} finally { await withoutBindings.dispose(); }

@@ -15,6 +15,7 @@ export const orders = sqliteTable("orders", {
   id: text().primaryKey(),
   tracking: text().unique().notNull(),
   request_key: text().unique().notNull(),
+  request_hash: text(),
   code: text().notNull(),
   customer: text().notNull(),
   slot: integer().notNull(),
@@ -34,6 +35,7 @@ export const orders = sqliteTable("orders", {
 }, (table) => [
   index("orders_slot_payment").on(table.slot, table.payment),
   index("orders_created_at").on(table.created_at),
+  index("orders_payment_expiry").on(table.payment, table.expires_at),
 ]);
 
 export const submissions = sqliteTable("submissions", {

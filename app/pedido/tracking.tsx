@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock3, Copy, CreditCard, Receipt, TicketCheck } from "lucide-react";
 import { type Order, dayLabel, money, orderLabel, payments, stages, steps, time, windowLabel } from "@/lib/federal";
-import { api, errorMessage, readLocal, rememberOrder, type RememberedOrder } from "@/lib/client";
+import { api, errorMessage, rememberedOrders, rememberOrder, type RememberedOrder } from "@/lib/client";
 import { Empty, LocationLink, SiteFooter, SiteHeader } from "../site-ui";
 
 export function OrderHistory() {
   const [list, setList] = useState<RememberedOrder[]>([]);
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
-  useEffect(() => setList(readLocal("federal-pedidos", [])), []);
+  useEffect(() => setList(rememberedOrders()), []);
   function lookup(event: FormEvent) {
     event.preventDefault();
     const token = value.trim().match(/(?:^|\/pedido\/)([a-f0-9]{32})(?:\/?(?:[?#].*)?)$/i)?.[1];
@@ -36,23 +36,38 @@ export function Tracking({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
+  const read = useRef<AbortController | null>(null);
+  const sending = useRef(false);
+  const terminal = order?.stage === "cancelado" || order?.stage === "retirado";
   async function refresh() {
+    if (sending.current || read.current) return;
+    const controller = new AbortController();
+    read.current = controller;
     try {
-      const result = await api<Order>(`pedido/${encodeURIComponent(token)}`);
-      setOrder(result); rememberOrder(result); setError("");
-    } catch (problem) { setError(errorMessage(problem)); }
-    finally { setLoading(false); }
+      const result = await api<Order>(`pedido/${encodeURIComponent(token)}`, undefined, controller.signal);
+      if (!controller.signal.aborted) { setOrder(result); rememberOrder(result); setError(""); }
+    } catch (problem) {
+      if (!controller.signal.aborted) setError(errorMessage(problem));
+    } finally {
+      if (read.current === controller) read.current = null;
+      if (!controller.signal.aborted) setLoading(false);
+    }
   }
   useEffect(() => {
+    if (terminal) return;
     void refresh();
     const interval = setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
-    return () => clearInterval(interval);
-  }, [token]);
+    return () => { clearInterval(interval); read.current?.abort(); read.current = null; };
+  }, [token, terminal]);
   async function payment(action: string) {
+    if (sending.current) return;
+    sending.current = true;
+    read.current?.abort();
+    read.current = null;
     setBusy(true); setFeedback("");
-    try { setOrder(await api<Order>(`pagamento/${token}`, { action })); }
+    try { setOrder(await api<Order>(`pagamento-demo/${token}`, { mode: "demo", action })); }
     catch (problem) { setFeedback(errorMessage(problem)); }
-    finally { setBusy(false); }
+    finally { sending.current = false; setBusy(false); }
   }
   async function copy() {
     try { await navigator.clipboard.writeText(window.location.href); setFeedback("Link privado copiado."); }
@@ -70,7 +85,6 @@ export function Tracking({ token }: { token: string }) {
       {error && <p className="notice" role="status">{error}</p>}
       {feedback && <p className="notice" role="status">{feedback}</p>}
       <div className="tracking-grid">
-        <div className="tracking-main">
           <section className="panel tracking-progress" aria-label="Estado do pedido">
             <div className="progress-title"><h2>Acompanhamento</h2><span className={`state-badge stage-${order.stage}`}>{stages[order.stage]}</span></div>
             {inactive ? <p>A simulação foi encerrada. Para fazer outro teste, volte ao cardápio.</p> : order.payment === "pendente"
@@ -84,8 +98,6 @@ export function Tracking({ token }: { token: string }) {
               <button className="inline-action" disabled={busy} onClick={() => payment("expirado")}>Expirar reserva</button>
             </div>}
           </section>
-          <section className="panel"><h2>Resumo do pedido</h2><OrderItems order={order} /><div className="summary order-total"><span>Total de teste</span><strong>{money(order.total)}</strong></div></section>
-        </div>
         <aside className="panel pickup-ticket">
           <div className="ticket-icon"><TicketCheck size={26} /></div><h2>Retirada na Kombi</h2><p>Nome no pedido <strong>{order.customer}</strong></p>
           {order.code && order.stage !== "retirado" ? <><p>Apresente este código no balcão quando o pedido estiver pronto.</p><strong className="pickup-code">{order.code}</strong></>
@@ -94,6 +106,7 @@ export function Tracking({ token }: { token: string }) {
           <LocationLink />
           {inactive && <a className="button button-primary full" href="/#cardapio">Voltar ao cardápio <ArrowRight size={18} /></a>}
         </aside>
+        <section className="panel tracking-summary"><h2>Resumo do pedido</h2><OrderItems order={order} /><div className="summary order-total"><span>Total de teste</span><strong>{money(order.total)}</strong></div></section>
       </div>
     </>}
   </main><SiteFooter /></>;

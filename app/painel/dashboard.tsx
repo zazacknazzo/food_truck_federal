@@ -136,7 +136,7 @@ function QueueCard({ order, save }: { order: Order; save: Save }) {
       {order.stage === "recebido" && <button className="button button-primary full" disabled={busy} onClick={() => action("start", "Preparo iniciado.")}><CirclePlay size={19} /> Iniciar preparo</button>}
       {order.stage === "em_preparo" && <button className="button button-primary full" disabled={busy} onClick={() => action("ready", "Pedido pronto para retirada.")}><Check size={19} /> Marcar pronto</button>}
       {order.stage === "pronto" && <form className="pickup-form" onSubmit={event => { event.preventDefault(); void action("pickup", "Retirada confirmada."); }}>
-        <label className="field"><span>Código mostrado pelo cliente</span><input value={code} onChange={event => setCode(event.target.value.toUpperCase())} minLength={5} maxLength={5} required placeholder="Código de 5 caracteres" autoComplete="off" /></label>
+        <label className="field"><span>Código mostrado pelo cliente</span><input value={code} onChange={event => setCode(event.target.value.toUpperCase())} minLength={5} maxLength={5} required placeholder="Código de 5 caracteres" autoComplete="off" autoCapitalize="characters" spellCheck={false} /></label>
         <button className="button button-primary full" disabled={busy}><TicketCheck size={19} /> Confirmar retirada</button></form>}
     </div>}
     {error && <p className="notice notice-error" role="alert">{error}</p>}
@@ -294,8 +294,23 @@ function PhotoInput({ label, value, onChange, onBusy }: { label: string; value: 
     setError("");
     if (file.size > 4 * 1024 * 1024) { setError("A imagem precisa ter até 4 MB."); return; }
     setBusy(true); onBusy(true);
-    try { onChange((await api<{ url: string }>("admin/upload", file)).url); }
-    catch (problem) { setError(errorMessage(problem)); }
+    try {
+      const bitmap = await createImageBitmap(file).catch(() => { throw new Error("Não foi possível abrir a foto. Confira o arquivo JPG, PNG ou WebP."); });
+      const canvas = document.createElement("canvas");
+      try {
+        const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Não foi possível preparar a foto neste navegador.");
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      } finally { bitmap.close(); }
+      // Upload the rendered pixels so the public copy has no camera or GPS metadata.
+      const image = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Não foi possível preparar a foto.")), "image/webp", .9);
+      });
+      onChange((await api<{ url: string }>("admin/upload", new File([image], "foto", { type: image.type }))).url);
+    } catch (problem) { setError(errorMessage(problem)); }
     finally { setBusy(false); onBusy(false); }
   }
   return <div className="photo-input">

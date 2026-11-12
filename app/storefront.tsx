@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, CalendarClock, Check, ChevronDown, Clock3, CreditCard, MapPin,
   Minus, Plus, Search, ShoppingBag, TicketCheck, Trash2,
@@ -9,7 +9,7 @@ import {
   type CartLine, type Method, type Order, type Pickup, type Product, type Scenario, type Slot,
   categories, dateKey, dayLabel, extrasFor, featured, linePrice, money, normalize, originalProducts, payments, windowLabel,
 } from "@/lib/federal";
-import { api, captureCampaign, errorMessage, readLocal, rememberOrder, writeLocal } from "@/lib/client";
+import { api, captureCampaign, checkoutRequestKey, errorMessage, readCart, rememberOrder, writeLocal } from "@/lib/client";
 import { Campaign, CategoryIcon, Empty, LocationLink, Modal, SiteFooter, SiteHeader } from "./site-ui";
 
 const cartKey = "federal-sacola-v1";
@@ -23,6 +23,7 @@ export default function Home() {
   const [pane, setPane] = useState<Pane>(null);
   const [selected, setSelected] = useState<Product | null>(null);
   const [editing, setEditing] = useState<CartLine | null>(null);
+  const [returnToBag, setReturnToBag] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("todos");
   const [all, setAll] = useState(false);
@@ -40,7 +41,7 @@ export default function Home() {
   }
 
   useEffect(() => {
-    setCart(readLocal(cartKey, []));
+    setCart(readCart(cartKey));
     setCampaign(captureCampaign());
     void syncStore();
     const timer = setInterval(() => { if (!document.hidden) void syncStore(); }, 15_000);
@@ -58,7 +59,7 @@ export default function Home() {
 
   function changeCart(next: CartLine[]) { setCart(next); writeLocal(cartKey, next); }
   function selectProduct(product: Product, item: CartLine | null = null) {
-    setSelected(product); setEditing(item); setPane("product");
+    setSelected(product); setEditing(item); setReturnToBag(pane === "bag"); setPane("product");
   }
   function addLine(item: CartLine) {
     if (editing) changeCart(cart.map(line => line.key === item.key ? item : line));
@@ -67,7 +68,7 @@ export default function Home() {
         line.press === item.press && line.extras.join() === item.extras.join() && line.note === item.note && line.quantity + item.quantity <= 15);
       changeCart(match ? cart.map(line => line.key === match.key ? { ...line, quantity: line.quantity + item.quantity } : line) : [...cart, item]);
     }
-    setPane(editing ? "bag" : null);
+    setPane(returnToBag ? "bag" : null);
     setToast(editing ? "Item atualizado na sacola." : `${selected?.nome ?? "Item"} na sacola.`);
   }
 
@@ -150,7 +151,7 @@ export default function Home() {
     <SiteFooter />
     {count > 0 && <div className="mobile-cart"><button className="button button-primary" onClick={() => setPane("bag")}><ShoppingBag size={19} /> Ver sacola <span>{count} {count === 1 ? "item" : "itens"} · {money(total)}</span></button></div>}
     <div className={`toast ${toast ? "toast-visible" : ""}`} role="status">{toast && <><Check size={18} /> {toast}</>}</div>
-    {pane === "product" && current && <Modal key="product" title={current.nome} onClose={() => setPane(editing ? "bag" : null)} kind="product-modal">
+    {pane === "product" && current && <Modal key="product" title={current.nome} onClose={() => setPane(returnToBag ? "bag" : null)} kind="product-modal">
       <ProductForm product={current} products={products} initial={editing} onSave={addLine} />
     </Modal>}
     {pane === "bag" && <Modal key="bag" title="Sua sacola" onClose={closePane} kind="drawer">
@@ -189,6 +190,7 @@ export default function Home() {
         onDone={order => {
           rememberOrder(order);
           if (order.payment === "aprovado" || order.payment === "pendente") changeCart([]);
+          else changeCart(cart.map(line => ({ ...line, key: crypto.randomUUID() })));
           window.location.assign(`/pedido/${order.tracking}`);
         }} />
     </Modal>}
@@ -241,7 +243,7 @@ function ProductForm({ product, products, initial, onSave }: { product: Product;
           <span>{extra.nome}{extra.disponivel === false && <small> · Esgotado</small>}</span><strong>+ {money(extra.preco_centavos)}</strong>
         </label>)}
       </div></fieldset>}
-      <label className="field"><span>Observação <small>opcional</small></span><textarea value={note} onChange={event => setNote(event.target.value)} maxLength={180} rows={2} placeholder={product.id === "nuggets" ? "Indique o molho desejado" : "Algum detalhe para o preparo?"} /></label>
+      <label className="field"><span>Observação <small>opcional</small></span><textarea value={note} onChange={event => setNote(event.target.value)} maxLength={180} rows={2} placeholder={product.id === "nuggets" ? "Indique o molho desejado" : "Informe apenas detalhes do preparo"} /></label>
     </div>
     <div className="modal-foot product-actions"><Quantity value={quantity} onChange={setQuantity} />
       <button className="button button-primary" disabled={soldOut || hasSoldOutExtra}>{initial ? "Salvar item" : "Adicionar"} <span>{money(linePrice(line, products))}</span></button>
@@ -265,7 +267,7 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   const [scenario, setScenario] = useState<Scenario>("aprovado");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [requestKey, setRequestKey] = useState("");
+  const sending = useRef(false);
 
   async function fetchSlots() {
     setLoading(true);
@@ -278,31 +280,36 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void fetchSlots(); setRequestKey(crypto.randomUUID()); }, []);
-  const days = useMemo(() => [...new Map(slots.filter(s => s.remaining > 0).map(s => [dateKey(s.start), dayLabel(s.start)])).entries()], [slots]);
-  const activeDay = day || days[0]?.[0] || "";
-  const daySlots = slots.filter(s => dateKey(s.start) === activeDay);
+  useEffect(() => { void fetchSlots(); }, []);
+  const days = useMemo(() => [...new Map(slots.map(s => [dateKey(s.start), dayLabel(s.start)])).entries()], [slots]);
   const next = slots.find(s => s.remaining > 0);
-  const activeSlot = daySlots.find(s => s.start === slot && s.remaining > 0) ?? daySlots.find(s => s.remaining > 0);
-  const chosen = pickup === "imediata" ? next : activeSlot;
+  const activeDay = day || (next ? dateKey(next.start) : days[0]?.[0]) || "";
+  const daySlots = slots.filter(s => dateKey(s.start) === activeDay);
+  const activeSlot = slot === null ? daySlots.find(s => s.remaining > 0) : daySlots.find(s => s.start === slot);
+  const chosen = pickup === "imediata" ? next : activeSlot && activeSlot.remaining > 0 ? activeSlot : undefined;
+  const unavailableSlot = pickup === "agendada" && slot !== null && !chosen;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!chosen || busy || !requestKey) return;
+    if (!chosen || sending.current) return;
+    sending.current = true;
+    if (pickup === "agendada") { setDay(activeDay); setSlot(chosen.start); }
     setBusy(true); onBusy(true); setError("");
     try {
-      onDone(await api<Order>("pedido", { customer: name, method, scenario, pickup, slot: chosen.start, items: cart, total, campaign, requestKey }));
+      const draft = { customer: name.trim(), method, scenario, pickup, slot: pickup === "agendada" ? chosen.start : null, items: cart, total, campaign };
+      const requestKey = await checkoutRequestKey(draft);
+      onDone(await api<Order>("pedido", { ...draft, requestKey }));
     } catch (problem) {
       setError(errorMessage(problem));
       await Promise.all([fetchSlots(), onChange()]);
-    } finally { setBusy(false); onBusy(false); }
+    } finally { sending.current = false; setBusy(false); onBusy(false); }
   }
 
   return <form className="modal-form" onSubmit={submit}>
     <div className="modal-body form-stack checkout-body">
       <button type="button" className="inline-action back-action" onClick={onBack} disabled={busy}><ArrowLeft size={16} /> Voltar à sacola</button>
-      <div className="notice demo-notice"><CreditCard size={21} /><div><strong>Checkout demonstrativo</strong><p>Simulador com Pix e cartão. Mercado Pago é a integração prevista. Use um apelido e dados de teste.</p></div></div>
-      <label className="field"><span>Nome ou apelido para retirada</span><input required minLength={2} maxLength={60} value={name} onChange={event => setName(event.target.value)} placeholder="Ex. Alex" /></label>
+      <div className="notice demo-notice"><CreditCard size={21} /><div><strong>Checkout demonstrativo</strong><p>Simulador com Pix e cartão. Mercado Pago é a integração prevista. Use um apelido e detalhes de teste.</p></div></div>
+      <label className="field"><span>Nome ou apelido para retirada</span><input required minLength={2} maxLength={60} value={name} onChange={event => setName(event.target.value)} placeholder="Ex. Alex" autoComplete="off" /></label>
       <fieldset><legend>Quando você quer retirar?</legend><div className="choice-grid pickup-choices">
         <label className="choice"><input type="radio" name="pickup" checked={pickup === "imediata"} onChange={() => setPickup("imediata")} /><span><strong><Clock3 size={16} /> Próxima vaga</strong><small>Retirada imediata</small></span></label>
         <label className="choice"><input type="radio" name="pickup" checked={pickup === "agendada"} onChange={() => setPickup("agendada")} /><span><strong><CalendarClock size={16} /> Agendar</strong><small>Escolha uma janela</small></span></label>
@@ -312,11 +319,20 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
         scheduleError ? <p className="notice notice-error" role="alert">{scheduleError} <button type="button" className="inline-action" onClick={fetchSlots}>Recarregar horários</button></p> :
         !next ? <p className="notice">Nenhuma vaga disponível nos próximos sete dias.</p> :
         pickup === "imediata" ? <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(next.start)} · {windowLabel(next.start)}</strong><small>Janela estimada para retirada · horário de São Paulo</small></div></div> :
-        <div className="checkout-times">
-          <label className="field"><span>Dia da retirada</span><select value={activeDay} onChange={event => { setDay(event.target.value); setSlot(null); }}>{days.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-          <label className="field"><span>Janela de 15 minutos</span><select value={activeSlot?.start ?? ""} onChange={event => setSlot(Number(event.target.value))}>
-            {!activeSlot && <option value="">Escolha outro dia</option>}{daySlots.map(s => <option key={s.start} value={s.start} disabled={!s.remaining}>{windowLabel(s.start)} · {s.remaining ? `${s.remaining} ${s.remaining === 1 ? "vaga" : "vagas"}` : "Lotado"}</option>)}</select></label>
-        </div>}
+        <>
+          <div className="checkout-times">
+            <label className="field"><span>Dia da retirada</span><select value={activeDay} onChange={event => { setDay(event.target.value); setSlot(null); }}>
+              {day && !days.some(([key]) => key === day) && <option value={day} disabled>Dia indisponível</option>}
+              {days.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select></label>
+            <label className="field"><span>Janela de 15 minutos</span><select value={slot ?? activeSlot?.start ?? ""} onChange={event => { setDay(activeDay); setSlot(Number(event.target.value)); }}>
+              {slot !== null && !activeSlot && <option value={slot} disabled>{windowLabel(slot)} · Indisponível</option>}
+              {slot === null && !activeSlot && <option value="">Escolha outro dia</option>}
+              {daySlots.map(s => <option key={s.start} value={s.start} disabled={!s.remaining}>{windowLabel(s.start)} · {s.remaining ? `${s.remaining} ${s.remaining === 1 ? "vaga" : "vagas"}` : "Lotado"}</option>)}
+            </select></label>
+          </div>
+          {unavailableSlot && <p className="notice" role="status">A janela escolhida ficou indisponível. Selecione outro horário.</p>}
+        </>}
       <div className="checkout-times">
         <label className="field"><span>Forma de pagamento de teste</span><select value={method} onChange={event => setMethod(event.target.value as Method)}><option>Pix</option><option>Cartão</option></select></label>
         <label className="field"><span>Resultado da simulação</span><select value={scenario} onChange={event => setScenario(event.target.value as Scenario)}>{(["aprovado", "pendente", "recusado", "expirado"] as const).map(p => <option value={p} key={p}>{payments[p]}</option>)}</select></label>
@@ -324,6 +340,6 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
       {scenario === "pendente" && <p className="muted">A reserva de teste expira em cinco minutos. Você pode simular a aprovação na página do pedido.</p>}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
     </div>
-    <div className="modal-foot"><div className="summary"><span>Total de teste</span><strong>{money(total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || loading || paused || !!scheduleError || !chosen || !requestKey}>{busy ? "Registrando pedido…" : "Simular pedido"} <ArrowRight size={19} /></button></div>
+    <div className="modal-foot"><div className="summary"><span>Total de teste</span><strong>{money(total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || loading || paused || !!scheduleError || !chosen}>{busy ? "Registrando pedido…" : "Simular pedido"} <ArrowRight size={19} /></button></div>
   </form>;
 }

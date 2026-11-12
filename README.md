@@ -119,6 +119,12 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 
 Replace the filename with the pending migration and `DB` with your D1 binding name if different. Use `.wrangler/state`, not `.wrangler/state/v3`; Wrangler adds the versioned directories. Do not replay migrations already applied locally. This updates only the preview database; publishing applies production migrations separately.
 
+## QA do Food Truck Federal
+
+Rode `npm run build` e depois `node scripts/qa-federal.mjs`. Os testes usam D1 e R2 de teste e aplicam as migrações em ordem, incluindo a leitura de um pedido anterior à migração de idempotência.
+
+O checkout e o endpoint `/api/pagamento-demo/{token}` operam com pagamentos simulados. O painel usa os cabeçalhos de identidade autenticada do ChatGPT Sites e os e-mails autorizados em `FEDERAL_OPERATORS`, definidos no ambiente do servidor.
+
 ## Diagnostic Commands
 
 - `npm run install:ci`: perform the one locked dependency install
