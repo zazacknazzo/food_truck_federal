@@ -121,9 +121,9 @@ Replace the filename with the pending migration and `DB` with your D1 binding na
 
 ## QA do Food Truck Federal
 
-Rode `npm run build` e depois `node scripts/qa-federal.mjs`. Os testes usam D1 e R2 de teste e aplicam as migrações em ordem, incluindo a leitura de um pedido anterior à migração de idempotência.
+Rode `npm run build` e depois `node scripts/qa-federal.mjs` e `node scripts/qa-mercado-pago.mjs`. Os testes usam D1 e R2 isolados e aplicam as migrações em ordem. As chamadas ao Mercado Pago são simuladas pelo ambiente de teste.
 
-O checkout e o endpoint `/api/pagamento-demo/{token}` operam com pagamentos simulados. O painel usa os cabeçalhos de identidade autenticada do ChatGPT Sites e os e-mails autorizados em `FEDERAL_OPERATORS`, definidos no ambiente do servidor.
+O checkout público usa pagamentos simulados em DEMO, o modo padrão. O painel usa os cabeçalhos de identidade autenticada do ChatGPT Sites e a lista `FEDERAL_OPERATORS`, definida no servidor. A arquitetura de pagamentos, a configuração da proprietária e o checklist de ativação estão no [guia de homologação](docs/homologacao-mercado-pago.md).
 
 ## Diagnostic Commands
 

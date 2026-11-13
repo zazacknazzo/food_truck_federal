@@ -30,17 +30,44 @@ export const campaignPath = "/?utm_source=cartaz&utm_campaign=federal-avdi#carda
 
 export type DayHours = { open: boolean; start: string; end: string };
 export type SlotOverride = { date: string; start: string; end: string; capacity: number };
-export type Config = { paused: boolean; capacity: number; hours: DayHours[]; overrides: SlotOverride[] };
+export type Mode = "demo" | "teste" | "producao";
+export type MercadoPagoMode = Exclude<Mode, "demo">;
+export const modes = { demo: "Demonstração", teste: "Teste Mercado Pago", producao: "Operação comercial" } as const;
+
+export const commercialFields = [
+  { key: "seller", label: "Nome do vendedor", limit: 120 },
+  { key: "identification", label: "Identificação pública do vendedor", limit: 120 },
+  { key: "contact", label: "Contato para atendimento", limit: 200 },
+  { key: "address", label: "Endereço da Kombi", limit: 240 },
+  { key: "servicePolicy", label: "Política de atendimento", limit: 2500 },
+  { key: "cancellationPolicy", label: "Política de cancelamento", limit: 2500 },
+  { key: "privacyPolicy", label: "Política de privacidade", limit: 2500 },
+] as const;
+export type CommercialInfo = Record<typeof commercialFields[number]["key"], string> & { reviewed: boolean };
+export const emptyCommercialInfo: CommercialInfo = {
+  seller: "", identification: "", contact: "", address: "", servicePolicy: "",
+  cancellationPolicy: "", privacyPolicy: "", reviewed: false,
+};
+export function commercialInfoReady(info: CommercialInfo) {
+  return info.reviewed && commercialFields.every(({ key }) => info[key].trim().length > 0);
+}
+export type Config = {
+  paused: boolean; capacity: number; leadMinutes: number; hours: DayHours[];
+  overrides: SlotOverride[]; commercial: CommercialInfo;
+};
 export const defaultConfig: Config = {
   paused: false,
   capacity: 10,
+  leadMinutes: 10,
   hours: Array.from({ length: 7 }, (_, i) => ({ open: i !== 0, start: "10:00", end: "22:00" })),
   overrides: [],
+  commercial: emptyCommercialInfo,
 };
 export const weekdays = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 export const zone = "America/Sao_Paulo";
 export const slotMs = 15 * 60_000;
 export const stages = {
+  aguardando_pagamento: "Aguardando pagamento",
   recebido: "Recebido",
   em_preparo: "Em preparo",
   pronto: "Pronto",
@@ -52,12 +79,14 @@ export const payments = {
   pendente: "Pendente",
   recusado: "Recusado",
   expirado: "Expirado",
+  estorno_solicitado: "Estorno solicitado",
   reembolsado: "Reembolsado",
+  em_revisao: "Pagamento em revisão",
 } as const;
 export const steps = ["recebido", "em_preparo", "pronto", "retirado"] as const;
 export type Stage = keyof typeof stages;
 export type Payment = keyof typeof payments;
-export type Scenario = Exclude<Payment, "reembolsado">;
+export type Scenario = "aprovado" | "pendente" | "recusado" | "expirado";
 export type Pickup = "imediata" | "agendada";
 export type Method = "Pix" | "Cartão";
 export type Slot = { start: number; remaining: number; capacity: number };
@@ -82,7 +111,8 @@ export type Item = {
   total: number;
 };
 export type Order = {
-  demo: true;
+  demo: boolean;
+  mode: Mode;
   id: string;
   tracking?: string;
   code?: string;
@@ -91,7 +121,7 @@ export type Order = {
   pickup: Pickup;
   items: Item[];
   total: number;
-  method: Method;
+  method: Method | "Mercado Pago";
   payment: Payment;
   stage: Stage;
   campaign?: string | null;

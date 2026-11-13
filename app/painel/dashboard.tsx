@@ -6,14 +6,16 @@ import {
   Clock3, GraduationCap, PackageOpen, Plus, Search, Settings2, TicketCheck, Trash2,
 } from "lucide-react";
 import {
-  type Config, type Metrics, type Order, type Product, type SlotOverride, type Submission,
-  categories, dayLabel, money, normalize, orderLabel, payments, stages, time, weekdays, windowLabel,
+  type CommercialInfo, type Config, type Metrics, type Mode, type Order, type Product, type SlotOverride, type Submission,
+  categories, commercialFields, dayLabel, modes, money, normalize, orderLabel, payments, stages, time, weekdays, windowLabel,
 } from "@/lib/federal";
 import { ApiError, api, errorMessage } from "@/lib/client";
 import { Brand, Empty, Modal } from "../site-ui";
 import { OrderItems } from "../pedido/tracking";
 
-type AdminData = { config: Config; products: Product[]; orders: Order[]; history: Order[]; metrics: Metrics; submissions: Submission[] };
+type Finance = { refunds: number; reviews: number; interruptions: number; mismatches: number;
+  problems: { orderId: string; paymentId: string; state: "requested" | "review" }[] };
+type AdminData = { mode: Mode; config: Config; products: Product[]; orders: Order[]; history: Order[]; metrics: Metrics; finance: Finance | null; submissions: Submission[] };
 const tabs = [
   { id: "fila", label: "Fila de pedidos", short: "Fila", icon: ClipboardList },
   { id: "catalogo", label: "Catálogo", short: "Catálogo", icon: PackageOpen },
@@ -96,7 +98,7 @@ export default function Dashboard() {
   async function save(path: string, body: Record<string, unknown>, message: string) {
     if (connectionError) throw new Error("Atualize o painel antes de repetir a ação.");
     try {
-      await api(path, body, AbortSignal.timeout(panelRequestTimeoutMs));
+      await api(path, body, AbortSignal.timeout(path.startsWith("admin/conciliar") ? 30_000 : panelRequestTimeoutMs));
     } catch (problem) {
       if (problem instanceof ApiError && [400, 403, 404, 409, 413, 415].includes(problem.status)) {
         if (problem.status === 403 || problem.status === 409) await refresh(true);
@@ -143,7 +145,7 @@ export default function Dashboard() {
       </div>
     </aside>
     <main className="admin-main">
-      <div className="admin-top"><div><span className="eyebrow">Operação demonstrativa</span><h1>{tabs.find(t => t.id === tab)?.label}</h1></div>
+      <div className="admin-top"><div><span className="eyebrow">{data && data.mode !== "demo" ? modes[data.mode] : "Operação demonstrativa"}</span><h1>{tabs.find(t => t.id === tab)?.label}</h1></div>
         {data && <button className={`button ${data.config.paused ? "button-primary" : "button-outline"}`} type="button" disabled={pausing || Boolean(connectionError)} onClick={pause}>
           {data.config.paused ? <CirclePlay size={19} /> : <CirclePause size={19} />} {data.config.paused ? "Retomar pedidos" : "Pausar pedidos"}
         </button>}</div>
@@ -156,10 +158,10 @@ export default function Dashboard() {
       {newOrders.length > 0 && <div className="notice admin-notice"><p aria-hidden="true"><Bell size={17} /> {newOrderLabel}</p>
         <button className="button button-outline" type="button" onClick={() => { showTab("fila"); setFilter("todos"); setNewOrders([]); }}>Ver na fila</button></div>}
       {!data ? !connectionError && <p className="muted" role="status">Carregando operação…</p> : <>
-        {tab === "fila" && <Queue orders={data.orders} history={data.history} filter={filter} onFilter={setFilter} stale={Boolean(connectionError)} save={save} />}
+        {tab === "fila" && <Queue orders={data.orders} history={data.history} mode={data.mode} filter={filter} onFilter={setFilter} stale={Boolean(connectionError)} save={save} />}
         {tab === "catalogo" && <CatalogEditor products={data.products} save={save} />}
-        {tab === "operacao" && <Operation config={data.config} save={save} />}
-        {tab === "metricas" && <MetricsPanel metrics={data.metrics} />}
+        {tab === "operacao" && <div className="form-stack"><Operation config={data.config} save={save} /><CommercialForm info={data.config.commercial} save={save} /></div>}
+        {tab === "metricas" && <><MetricsPanel metrics={data.metrics} mode={data.mode} />{data.finance && <FinancePanel finance={data.finance} stale={Boolean(connectionError)} save={save} />}</>}
         {tab === "avdi" && <Submissions products={data.products} submissions={data.submissions} save={save} />}
       </>}
     </main>
@@ -168,14 +170,15 @@ export default function Dashboard() {
 
 type Save = (path: string, body: Record<string, unknown>, message: string) => Promise<void>;
 type Filter = "todos" | "recebido" | "em_preparo" | "pronto" | "pendente" | "historico";
-function Queue({ orders, history, filter, onFilter, stale, save }: {
-  orders: Order[]; history: Order[]; filter: Filter; onFilter: (filter: Filter) => void; stale: boolean; save: Save;
+function waiting(order: Order) { return order.stage === "aguardando_pagamento" || order.demo && order.payment === "pendente"; }
+function Queue({ orders, history, mode, filter, onFilter, stale, save }: {
+  orders: Order[]; history: Order[]; mode: Mode; filter: Filter; onFilter: (filter: Filter) => void; stale: boolean; save: Save;
 }) {
   const counts = {
     recebido: orders.filter(order => order.payment === "aprovado" && order.stage === "recebido").length,
     em_preparo: orders.filter(order => order.stage === "em_preparo").length,
     pronto: orders.filter(order => order.stage === "pronto").length,
-    pendente: orders.filter(order => order.payment === "pendente").length,
+    pendente: orders.filter(waiting).length,
   };
   const filterList: { id: Filter; name: string; count: number }[] = [
     { id: "todos", name: "Fila", count: orders.length }, { id: "recebido", name: "Novos", count: counts.recebido },
@@ -183,14 +186,14 @@ function Queue({ orders, history, filter, onFilter, stale, save }: {
     { id: "pendente", name: "Pendentes", count: counts.pendente }, { id: "historico", name: "Histórico", count: history.length },
   ];
   const visible = filter === "historico" ? history : orders.filter(order =>
-    filter === "todos" || (filter === "pendente" ? order.payment === "pendente" : order.stage === filter && order.payment === "aprovado"));
+    filter === "todos" || (filter === "pendente" ? waiting(order) : order.stage === filter && order.payment === "aprovado"));
   return <>
     <div className="queue-stats"><Stat title="Novos" value={counts.recebido} /><Stat title="Em preparo" value={counts.em_preparo} /><Stat title="Prontos" value={counts.pronto} /></div>
     <div className="admin-filters" aria-label="Filtrar fila">
       {filterList.map(f => <button className={`category-pill ${filter === f.id ? "active" : ""}`} key={f.id} aria-pressed={filter === f.id} onClick={() => onFilter(f.id)}>{f.name} <small>{f.count}</small></button>)}
     </div>
     {visible.length ? <div className="queue-grid">{visible.map(order => <QueueCard key={order.id} order={order} stale={stale} save={save} />)}</div> :
-      <Empty title={filter === "historico" ? "Histórico vazio" : "Nenhum pedido nesta fila"}>{filter === "historico" ? "Pedidos concluídos e cancelados dos últimos sete dias aparecem aqui." : <>Registre um pedido de teste na <a href="/#cardapio">loja</a> para ver a fila em ação.</>}</Empty>}
+      <Empty title={filter === "historico" ? "Histórico vazio" : "Nenhum pedido nesta fila"}>{filter === "historico" ? "Pedidos concluídos e cancelados dos últimos sete dias aparecem aqui." : mode === "producao" ? "Os pedidos disponíveis aparecem aqui." : <>Registre um pedido de teste na <a href="/#cardapio">loja</a> para ver a fila em ação.</>}</Empty>}
   </>;
 }
 
@@ -201,7 +204,8 @@ function QueueCard({ order, stale, save }: { order: Order; stale: boolean; save:
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   const canMove = order.payment === "aprovado" && ["recebido", "em_preparo", "pronto"].includes(order.stage);
-  const canCancel = canMove || (order.stage === "recebido" && order.payment === "pendente");
+  const pending = waiting(order);
+  const canCancel = canMove || pending;
   async function action(action: string, label: string) {
     if (sending.current || stale) return;
     sending.current = true;
@@ -211,12 +215,12 @@ function QueueCard({ order, stale, save }: { order: Order; stale: boolean; save:
     finally { sending.current = false; setBusy(false); }
   }
   return <article className="panel queue-card">
-    <div className="queue-card-top"><div><small>{orderLabel(order.id)}</small><h2>{order.customer}</h2></div><span className={`state-badge stage-${order.payment === "pendente" ? "pendente" : order.stage}`}>{order.payment === "pendente" ? "Reserva pendente" : stages[order.stage]}</span></div>
+    <div className="queue-card-top"><div><small>{orderLabel(order.id)}</small><h2>{order.customer}</h2></div><span className={`state-badge stage-${pending ? "pendente" : order.stage}`}>{pending && order.demo ? "Reserva pendente" : stages[order.stage]}</span></div>
     <p className="queue-time"><CalendarClock size={17} /> {dayLabel(order.slot)} · {windowLabel(order.slot)} <span>{order.pickup === "agendada" ? "Agendado" : "Próxima vaga"}</span></p>
-    <div className="queue-financial"><span>{order.method} de teste</span><strong>{payments[order.payment]}</strong></div>
+    <div className="queue-financial"><span>{order.method}{order.mode === "producao" ? "" : " de teste"}</span><strong>{payments[order.payment]}</strong></div>
     <OrderItems order={order} />
-    <div className="summary order-total"><span>Total demonstrativo</span><strong>{money(order.total)}</strong></div>
-    {order.payment === "pendente" && <p className="muted">Reserva pendente até {time(order.expires_at!)}.</p>}
+    <div className="summary order-total"><span>{order.mode === "producao" ? "Total" : "Total demonstrativo"}</span><strong>{money(order.total)}</strong></div>
+    {pending && order.expires_at !== null && <p className="muted">Reserva até {time(order.expires_at)}.</p>}
     {order.events && <details className="order-events"><summary>Eventos do pedido <ChevronDown size={16} /></summary>
       <ul>{order.events.map((event, i) => <li key={i}><time>{time(event.at)}</time> {event.label}</li>)}</ul>
     </details>}
@@ -228,7 +232,7 @@ function QueueCard({ order, stale, save }: { order: Order; stale: boolean; save:
         <button className="button button-primary full" disabled={busy || stale || code.trim().length !== 5}><TicketCheck size={19} /> Confirmar retirada</button></form>}
     </div>}
     {error && <p className="notice notice-error" role="alert">{error}</p>}
-    {canCancel && (confirm ? <div className="notice cancel-confirm"><span>Cancelar este pedido de teste?</span><button className="inline-action" disabled={busy || stale} onClick={() => action("cancel", "Pedido cancelado.")}>Confirmar cancelamento</button><button className="inline-action" onClick={() => setConfirm(false)}>Voltar</button></div>
+    {canCancel && (confirm ? <div className="notice cancel-confirm"><span>{order.demo ? "Cancelar este pedido de teste?" : canMove ? "Cancelar o pedido e solicitar o estorno integral?" : "Cancelar esta reserva?"}</span><button className="inline-action" disabled={busy || stale} onClick={() => action("cancel", "Pedido cancelado.")}>Confirmar cancelamento</button><button className="inline-action" onClick={() => setConfirm(false)}>Voltar</button></div>
       : <button className="inline-action danger" onClick={() => setConfirm(true)}>Cancelar pedido</button>)}
   </article>;
 }
@@ -297,12 +301,15 @@ function Operation({ config, save }: { config: Config; save: Save }) {
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    try { await save("admin/operacao", { capacity: draft.capacity, hours: draft.hours, overrides: draft.overrides }, "Horários e capacidade atualizados."); }
+    try { await save("admin/operacao", { capacity: draft.capacity, leadMinutes: draft.leadMinutes, hours: draft.hours, overrides: draft.overrides }, "Horários e capacidade atualizados."); }
     catch (problem) { setError(errorMessage(problem)); }
     finally { setBusy(false); }
   }
   return <form className="form-stack" onSubmit={submit}>
-    <div className="panel form-stack"><h2>Capacidade por janela</h2><label className="field capacity-field"><span>Pedidos a cada 15 minutos</span><input type="number" value={draft.capacity || ""} required min={1} max={15} onChange={event => setDraft({ ...draft, capacity: Number(event.target.value) })} /></label><p className="muted">O limite inicial de 10 pedidos e os horários abaixo são parâmetros de teste. Os horários usam o fuso de São Paulo.</p></div>
+    <div className="panel form-stack"><h2>Capacidade por janela</h2>
+      <label className="field capacity-field"><span>Pedidos a cada 15 minutos</span><input type="number" value={draft.capacity || ""} required min={1} max={15} onChange={event => setDraft({ ...draft, capacity: Number(event.target.value) })} /></label>
+      <label className="field capacity-field"><span>Antecedência mínima em minutos</span><input type="number" value={draft.leadMinutes || ""} required min={10} max={120} onChange={event => setDraft({ ...draft, leadMinutes: Number(event.target.value) })} /></label>
+      <p className="muted">Os horários usam o fuso de São Paulo. Alterações valem para novas reservas.</p></div>
     <div className="panel form-stack"><h2>Horários da semana</h2>
       {draft.hours.map((item, index) => <div className="schedule-row" key={weekdays[index]}>
         <label className="schedule-day"><input type="checkbox" checked={item.open} onChange={event => setDraft({ ...draft, hours: draft.hours.map((h, i) => i === index ? { ...h, open: event.target.checked } : h) })} /> {weekdays[index]}</label>
@@ -324,6 +331,29 @@ function Operation({ config, save }: { config: Config; save: Save }) {
   </form>;
 }
 
+function CommercialForm({ info, save }: { info: CommercialInfo; save: Save }) {
+  const [draft, setDraft] = useState(info);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
+    try { await save("admin/comercial", draft, "Dados comerciais atualizados."); }
+    catch (problem) { setError(errorMessage(problem)); }
+    finally { setBusy(false); }
+  }
+  return <form className="panel form-stack" onSubmit={submit}>
+    <h2>Dados comerciais e políticas</h2>
+    <p className="muted">Preencha apenas informações próprias para divulgação. Confira os dados antes de publicá-los no rodapé da loja.</p>
+    {commercialFields.map(({ key, label, limit }) => <label className="field" key={key}><span>{label}</span>
+      {limit > 1000 ? <textarea rows={3} value={draft[key]} maxLength={limit} onChange={event => setDraft({ ...draft, [key]: event.target.value, reviewed: false })} />
+        : <input value={draft[key]} maxLength={limit} onChange={event => setDraft({ ...draft, [key]: event.target.value, reviewed: false })} />}
+    </label>)}
+    <label className="schedule-day"><input type="checkbox" checked={draft.reviewed} onChange={event => setDraft({ ...draft, reviewed: event.target.checked })} /> Dados conferidos e autorizados para publicação</label>
+    {error && <p className="notice notice-error" role="alert">{error}</p>}
+    <div><button className="button button-primary" disabled={busy}>Salvar dados comerciais <Check size={19} /></button></div>
+  </form>;
+}
+
 const timeOptions = Array.from({ length: 97 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, "0")}:${String(i % 4 * 15).padStart(2, "0")}`);
 function TimeSelect({ value, onChange, disabled, end }: { value: string; onChange: (value: string) => void; disabled?: boolean; end?: boolean }) {
   return <select value={value} disabled={disabled} onChange={event => onChange(event.target.value)}>{(end ? timeOptions.slice(1) : timeOptions.slice(0, -1)).map(option => <option key={option}>{option}</option>)}</select>;
@@ -333,9 +363,9 @@ function Stat({ title, value }: { title: string; value: ReactNode }) {
   return <div className="panel stat"><span>{title}</span><strong>{value}</strong></div>;
 }
 
-function MetricsPanel({ metrics }: { metrics: Metrics }) {
+function MetricsPanel({ metrics, mode }: { metrics: Metrics; mode: Mode }) {
   return <>
-    <p className="muted metrics-caption">Últimos sete dias · somente atividade demonstrativa</p>
+    <p className="muted metrics-caption">Últimos sete dias · {modes[mode]}</p>
     <div className="metrics-stats"><Stat title="Pedidos registrados" value={metrics.count} /><Stat title="Pagamentos aprovados" value={metrics.approved} /><Stat title="Valor aprovado" value={money(metrics.value)} /><Stat title="Ticket médio" value={money(metrics.average)} /></div>
     <div className="metrics-grid">
       <div className="panel"><h2>Itens mais pedidos</h2>{metrics.top.length ? <div className="bar-list">{metrics.top.map(item => <div key={item.name}><div><strong>{item.name}</strong><span>{item.quantity}</span></div><progress aria-label={item.name} value={item.quantity} max={metrics.top[0].quantity} /></div>)}</div> : <p className="muted">Os pedidos aprovados de teste vão aparecer aqui.</p>}</div>
@@ -343,6 +373,34 @@ function MetricsPanel({ metrics }: { metrics: Metrics }) {
       <div className="panel"><h2><Clock3 size={21} /> Tempo médio de preparo</h2><p className="metric-value">{metrics.prepMinutes === null ? "Sem medições" : `${metrics.prepMinutes.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} min`}</p><p className="muted">Do início do preparo ao momento em que o pedido fica pronto.</p></div>
     </div>
   </>;
+}
+
+function FinancePanel({ finance, stale, save }: { finance: Finance; stale: boolean; save: Save }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  async function reconcile(orderId?: string) {
+    setBusy(orderId ?? "batch"); setError("");
+    const path = orderId ? `admin/conciliar/${orderId}` : "admin/conciliar";
+    try { await save(path, {}, orderId ? "Pedido consultado no Mercado Pago." : "Lote de conciliação consultado."); }
+    catch (problem) { setError(errorMessage(problem)); }
+    finally { setBusy(""); }
+  }
+  return <section className="panel form-stack finance-panel" aria-label="Conciliação Mercado Pago">
+    <h2>Conciliação Mercado Pago</h2>
+    <p>Estornos aguardando confirmação {finance.refunds} · Em revisão {finance.reviews}</p>
+    <p className="muted">Últimas 24 horas · Interrupções {finance.interruptions} · Divergências {finance.mismatches}</p>
+    <div><button className="button button-outline" type="button" disabled={Boolean(busy) || stale} onClick={() => reconcile()}>{busy === "batch" ? "Consultando…" : "Conciliar pagamentos"}</button></div>
+    {finance.problems.length > 0 && <div className="form-stack">
+      {finance.problems.map(problem => <div className="admin-notice notice" key={problem.paymentId}>
+        <div><strong>{orderLabel(problem.orderId)} · {problem.state === "review" ? "Em revisão" : "Estorno solicitado"}</strong>
+          <p>Pagamento {problem.paymentId}</p></div>
+        <button className="button button-outline" type="button" disabled={Boolean(busy) || stale} onClick={() => reconcile(problem.orderId)}>
+          {busy === problem.orderId ? "Consultando…" : "Consultar pedido"}
+        </button>
+      </div>)}
+    </div>}
+    {error && <p className="notice notice-error" role="alert">{error}</p>}
+  </section>;
 }
 
 function Submissions({ products, submissions, save }: { products: Product[]; submissions: Submission[]; save: Save }) {

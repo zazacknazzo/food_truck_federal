@@ -6,7 +6,7 @@ import {
   Minus, Plus, Search, ShoppingBag, TicketCheck, Trash2,
 } from "lucide-react";
 import {
-  type CartLine, type Method, type Order, type Pickup, type Product, type Scenario, type Slot,
+  type CartLine, type CommercialInfo, type Method, type Mode, type Order, type Pickup, type Product, type Scenario, type Slot,
   categories, dateKey, dayLabel, extrasFor, featured, linePrice, money, normalize, originalProducts, payments, windowLabel,
 } from "@/lib/federal";
 import { ApiError, api, captureCampaign, errorMessage, readCart, rememberOrder, writeLocal } from "@/lib/client";
@@ -17,9 +17,11 @@ const cartKey = "federal-sacola-v1";
 const checkoutResponseTimeoutMs = 20_000;
 type Pane = "bag" | "checkout" | "product" | null;
 
-export default function Home() {
+export default function Home({ initialMode }: { initialMode: Mode }) {
   const [products, setProducts] = useState(originalProducts);
   const [paused, setPaused] = useState(false);
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [commercial, setCommercial] = useState<CommercialInfo | null>(null);
   const [loadError, setLoadError] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [pane, setPane] = useState<Pane>(null);
@@ -35,9 +37,11 @@ export default function Home() {
 
   async function syncStore() {
     try {
-      const result = await api<{ products: Product[]; paused: boolean }>("loja");
+      const result = await api<{ products: Product[]; paused: boolean; mode: Mode; commercial: CommercialInfo | null }>("loja");
       setProducts(result.products);
       setPaused(result.paused);
+      setMode(result.mode);
+      setCommercial(result.commercial);
       setLoadError("");
     } catch (error) { setLoadError(errorMessage(error)); }
   }
@@ -87,7 +91,7 @@ export default function Home() {
 
   return <>
     <a className="skip" href="#cardapio">Ir ao cardápio</a>
-    <SiteHeader bag={count} onBag={() => setPane("bag")} home />
+    <SiteHeader bag={count} onBag={() => setPane("bag")} mode={mode} home />
     <main>
       <section className="container hero" aria-labelledby="hero-title">
         <div className="hero-copy">
@@ -152,7 +156,7 @@ export default function Home() {
         </div>
       </section>
     </main>
-    <SiteFooter />
+    <SiteFooter mode={mode} commercial={commercial} />
     {count > 0 && <div className="mobile-cart"><button className="button button-primary" onClick={() => setPane("bag")}><ShoppingBag size={19} /> Ver sacola <span>{count} {count === 1 ? "item" : "itens"} · {money(total)}</span></button></div>}
     <div className={`toast ${toast ? "toast-visible" : ""}`} role="status">{toast && <><Check size={18} /> {toast}</>}</div>
     {pane === "product" && current && <Modal key="product" title={current.nome} onClose={() => setPane(returnToBag ? "bag" : null)} kind="product-modal">
@@ -190,7 +194,7 @@ export default function Home() {
       </div>
     </Modal>}
     {pane === "checkout" && <Modal key="checkout" title="Retirada e checkout" onClose={closePane} kind="checkout-modal">
-      <Checkout cart={cart} total={total} campaign={campaign} onBack={() => setPane("bag")} onBusy={setSubmitting} onChange={syncStore}
+      <Checkout cart={cart} total={total} campaign={campaign} commercial={commercial} initialMode={mode} onBack={() => setPane("bag")} onBusy={setSubmitting} onChange={syncStore}
         onDone={order => {
           rememberOrder(order);
           if (order.payment === "aprovado" || order.payment === "pendente") changeCart([]);
@@ -255,14 +259,17 @@ function ProductForm({ product, products, initial, onSave }: { product: Product;
   </form>;
 }
 
-function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
-  cart: CartLine[]; total: number; campaign: string | null; onBack: () => void; onBusy: (value: boolean) => void;
+function Checkout({ cart, total, campaign, commercial, initialMode, onBack, onBusy, onDone, onChange }: {
+  cart: CartLine[]; total: number; campaign: string | null; commercial: CommercialInfo | null; initialMode: Mode;
+  onBack: () => void; onBusy: (value: boolean) => void;
   onDone: (order: Order) => void; onChange: () => Promise<void>;
 }) {
   const [retry, setRetry] = useState<CheckoutRequest | null>(() => pendingCheckoutAttempt(cart));
   const [pickup, setPickup] = useState<Pickup>(retry?.pickup ?? "imediata");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [paused, setPaused] = useState(false);
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [ready, setReady] = useState(true);
   const [loading, setLoading] = useState(true);
   const [scheduleError, setScheduleError] = useState("");
   const [day, setDay] = useState(retry?.slot ? dateKey(retry.slot) : "");
@@ -273,12 +280,16 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
+  const checkoutMode = retry ? retry.mode ?? "demo" : mode;
+  const demo = checkoutMode === "demo";
 
   async function fetchSlots() {
     setLoading(true);
     try {
-      const data = await api<{ slots: Slot[]; paused: boolean }>("horarios", undefined, AbortSignal.timeout(10_000));
+      const data = await api<{ slots: Slot[]; paused: boolean; ready: boolean; mode: Mode }>("horarios", undefined, AbortSignal.timeout(10_000));
       setPaused(data.paused);
+      setReady(data.ready);
+      setMode(data.mode);
       setSlots(data.slots);
       setScheduleError("");
     } catch (problem) { setScheduleError(errorMessage(problem)); }
@@ -297,7 +308,7 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   const chosen = pickup === "imediata" ? next : activeSlot && activeSlot.remaining > 0 ? activeSlot : undefined;
   const unavailableSlot = pickup === "agendada" && slot !== null && !chosen;
 
-  const canSend = Boolean(retry || (chosen && !loading && !paused && !scheduleError));
+  const canSend = Boolean(retry || (chosen && !loading && ready && !paused && !scheduleError));
   const lockFields = busy || Boolean(retry);
 
   async function submit(event: FormEvent) {
@@ -316,11 +327,12 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
     let order: Order;
     try {
       if (!request) {
-        request = startCheckoutAttempt({
-          customer: name.trim(), method, scenario, pickup,
+        const draft = {
+          customer: name.trim(), pickup,
           slot: pickup === "agendada" ? chosen?.start ?? null : null,
           items: cart, total, campaign,
-        });
+        };
+        request = startCheckoutAttempt(checkoutMode === "demo" ? { ...draft, mode: checkoutMode, method, scenario } : { ...draft, mode: checkoutMode });
       }
       order = await api<Order>("pedido", request, AbortSignal.timeout(checkoutResponseTimeoutMs));
     } catch (problem) {
@@ -348,7 +360,10 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   return <form className="modal-form" onSubmit={submit}>
     <div className="modal-body form-stack checkout-body">
       <button type="button" className="inline-action back-action" onClick={onBack} disabled={busy}><ArrowLeft size={16} /> Voltar à sacola</button>
-      <div className="notice demo-notice"><CreditCard size={21} /><div><strong>Checkout demonstrativo</strong><p>Simulador com Pix e cartão. Mercado Pago é a integração prevista. Use um apelido e detalhes de teste.</p></div></div>
+      <div className="notice demo-notice"><CreditCard size={21} /><div><strong>{demo ? "Checkout demonstrativo" : checkoutMode === "teste" ? "Homologação Mercado Pago" : "Checkout Mercado Pago"}</strong>
+        <p>{demo ? "Simulador com Pix e cartão. Use um apelido e detalhes de teste."
+          : checkoutMode === "teste" ? "Use a conta de teste compradora. Você tem cinco minutos para concluir o pagamento de teste."
+          : "Reserve a janela e conclua o pagamento no Mercado Pago em até cinco minutos."}</p></div></div>
       <label className="field"><span>Nome ou apelido para retirada</span><input required minLength={2} maxLength={60} disabled={lockFields} value={name} onChange={event => setName(event.target.value)} placeholder="Ex. Alex" autoComplete="off" /></label>
       <fieldset disabled={lockFields}><legend>Quando você quer retirar?</legend><div className="choice-grid pickup-choices">
         <label className="choice"><input type="radio" name="pickup" checked={pickup === "imediata"} onChange={() => setPickup("imediata")} /><span><strong><Clock3 size={16} /> Próxima vaga</strong><small>Retirada imediata</small></span></label>
@@ -358,6 +373,7 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
         loading ? <p className="muted" role="status">Buscando janelas de retirada…</p> :
         paused ? <p className="notice">A Kombi pausou novos pedidos.</p> :
         scheduleError ? <p className="notice notice-error" role="alert">{scheduleError} <button type="button" className="inline-action" onClick={() => fetchSlots()}>Recarregar horários</button></p> :
+        !ready ? <p className="notice">O checkout ainda não está liberado neste ambiente.</p> :
         !next ? <p className="notice">Nenhuma vaga disponível nos próximos sete dias.</p> :
         pickup === "imediata" ? <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(next.start)} · {windowLabel(next.start)}</strong><small>Janela estimada para retirada · horário de São Paulo</small></div></div> :
         <>
@@ -374,14 +390,18 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
           </div>
           {unavailableSlot && <p className="notice" role="status">A janela escolhida ficou indisponível. Selecione outro horário.</p>}
         </>}
-      <div className="checkout-times">
+      {demo && <div className="checkout-times">
         <label className="field"><span>Forma de pagamento de teste</span><select disabled={lockFields} value={method} onChange={event => setMethod(event.target.value as Method)}><option>Pix</option><option>Cartão</option></select></label>
         <label className="field"><span>Resultado da simulação</span><select disabled={lockFields} value={scenario} onChange={event => setScenario(event.target.value as Scenario)}>{(["aprovado", "pendente", "recusado", "expirado"] as const).map(p => <option value={p} key={p}>{payments[p]}</option>)}</select></label>
-      </div>
-      {scenario === "pendente" && <p className="muted">A reserva de teste expira em cinco minutos. Você pode simular a aprovação na página do pedido.</p>}
+      </div>}
+      {demo && scenario === "pendente" && <p className="muted">A reserva de teste expira em cinco minutos. Você pode simular a aprovação na página do pedido.</p>}
+      {checkoutMode === "producao" && commercial && <details className="order-events"><summary>Vendedor e políticas <ChevronDown size={16} /></summary>
+        <p className="muted">{commercial.seller} · {commercial.identification} · {commercial.contact}</p>
+        <a className="inline-action" href="/#dados-comerciais" target="_blank" rel="noreferrer">Consultar dados comerciais e políticas</a>
+      </details>}
       {retry && <p className="notice" role="status">O envio anterior pode ter sido registrado. Reenvie para conferir o mesmo pedido.</p>}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
     </div>
-    <div className="modal-foot"><div className="summary"><span>Total de teste</span><strong>{money(retry?.total ?? total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || !canSend}>{busy ? "Registrando pedido…" : retry ? "Reenviar pedido" : "Simular pedido"} <ArrowRight size={19} /></button></div>
+    <div className="modal-foot"><div className="summary"><span>{checkoutMode === "producao" ? "Total" : "Total de teste"}</span><strong>{money(retry?.total ?? total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || !canSend}>{busy ? "Registrando pedido…" : retry ? "Reenviar pedido" : demo ? "Simular pedido" : "Reservar e continuar"} <ArrowRight size={19} /></button></div>
   </form>;
 }

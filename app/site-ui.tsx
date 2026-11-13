@@ -5,7 +5,7 @@ import {
   ArrowDownRight, ArrowRight, ArrowUpRight, Beef, CupSoda, LayoutGrid, MapPin, Menu, PackageOpen,
   ShoppingBag, Sandwich, Shapes, Truck, X,
 } from "lucide-react";
-import { demoUrl, locationText, mapsUrl } from "@/lib/federal";
+import { commercialFields, demoUrl, locationText, mapsUrl, modes, type CommercialInfo, type Mode } from "@/lib/federal";
 
 export function Brand() {
   return <a href="/" className="brand" aria-label="Food Truck Federal, início">
@@ -14,10 +14,10 @@ export function Brand() {
   </a>;
 }
 
-export function SiteHeader({ bag, onBag, home = false }: { bag?: number; onBag?: () => void; home?: boolean }) {
+export function SiteHeader({ bag, onBag, home = false, mode = "demo" }: { bag?: number; onBag?: () => void; home?: boolean; mode?: Mode }) {
   const [nav, setNav] = useState(false);
   return <>
-    <div className="demo-strip"><div className="container strip-inner"><span><i /> Modo demonstração <span className="strip-detail">· Pedidos e pagamentos de teste</span></span><span className="strip-location"><MapPin size={13} /> Retirada na Kombi · São Paulo</span></div></div>
+    <div className="demo-strip"><div className="container strip-inner"><span><i /> {mode === "demo" ? "Modo demonstração" : modes[mode]} {mode !== "producao" && <span className="strip-detail">· Pedidos e pagamentos de teste</span>}</span><span className="strip-location"><MapPin size={13} /> Retirada na Kombi · São Paulo</span></div></div>
     <header className="site-header">
       <div className="container header-inner">
         <Brand />
@@ -37,15 +37,19 @@ export function SiteHeader({ bag, onBag, home = false }: { bag?: number; onBag?:
   </>;
 }
 
-export function SiteFooter() {
+export function SiteFooter({ mode = "demo", commercial }: { mode?: Mode; commercial?: CommercialInfo | null }) {
   return <footer className="site-footer">
     <div className="container">
       <div className="footer-main">
         <div><Brand /><p>Dogões, hambúrgueres e porções na Kombi vermelha.</p></div>
         <div className="footer-links"><a href="/#cardapio">Cardápio</a><a href="/pedido">Meus pedidos</a><a href={mapsUrl} target="_blank" rel="noreferrer">Ponto de retirada <ArrowUpRight size={14} /></a></div>
-        <div className="footer-links"><a href="/projeto-avdi">Projeto AVDI</a><a href="/painel">Painel da proprietária <ArrowUpRight size={14} /></a></div>
+        <div className="footer-links"><a href="/projeto-avdi">Projeto AVDI</a><a href="/painel">Painel da proprietária <ArrowUpRight size={14} /></a>
+          {commercial && <a href="#dados-comerciais">Dados comerciais e políticas</a>}</div>
       </div>
-      <div className="footer-bottom"><span>Comércio independente, em frente ao IFSP · Campus São Paulo.</span><span>Ambiente de demonstração</span></div>
+      {commercial && <section id="dados-comerciais" className="commercial-details" aria-label="Dados comerciais e políticas">
+        <dl>{commercialFields.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{commercial[key]}</dd></div>)}</dl>
+      </section>}
+      <div className="footer-bottom"><span>Comércio independente, em frente ao IFSP · Campus São Paulo.</span><span>{mode === "demo" ? "Ambiente de demonstração" : modes[mode]}</span></div>
     </div>
   </footer>;
 }
