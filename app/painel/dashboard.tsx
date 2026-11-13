@@ -1,51 +1,118 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowUpRight, BarChart3, CalendarClock, Camera, Check, ChevronDown, CirclePause, CirclePlay, ClipboardList,
+  ArrowUpRight, BarChart3, Bell, CalendarClock, Camera, Check, ChevronDown, CirclePause, CirclePlay, ClipboardList,
   Clock3, GraduationCap, PackageOpen, Plus, Search, Settings2, TicketCheck, Trash2,
 } from "lucide-react";
 import {
   type Config, type Metrics, type Order, type Product, type SlotOverride, type Submission,
   categories, dayLabel, money, normalize, orderLabel, payments, stages, time, weekdays, windowLabel,
 } from "@/lib/federal";
-import { api, errorMessage } from "@/lib/client";
+import { ApiError, api, errorMessage } from "@/lib/client";
 import { Brand, Empty, Modal } from "../site-ui";
 import { OrderItems } from "../pedido/tracking";
 
 type AdminData = { config: Config; products: Product[]; orders: Order[]; history: Order[]; metrics: Metrics; submissions: Submission[] };
 const tabs = [
-  { id: "fila", label: "Fila de pedidos", icon: ClipboardList },
-  { id: "catalogo", label: "Catálogo", icon: PackageOpen },
-  { id: "operacao", label: "Operação", icon: Settings2 },
-  { id: "metricas", label: "Métricas", icon: BarChart3 },
-  { id: "avdi", label: "Projeto AVDI", icon: GraduationCap },
+  { id: "fila", label: "Fila de pedidos", short: "Fila", icon: ClipboardList },
+  { id: "catalogo", label: "Catálogo", short: "Catálogo", icon: PackageOpen },
+  { id: "operacao", label: "Operação", short: "Operação", icon: Settings2 },
+  { id: "metricas", label: "Métricas", short: "Métricas", icon: BarChart3 },
+  { id: "avdi", label: "Projeto AVDI", short: "AVDI", icon: GraduationCap },
 ] as const;
 type Tab = typeof tabs[number]["id"];
+const panelRequestTimeoutMs = 10_000;
 
 export default function Dashboard() {
   const [data, setData] = useState<AdminData | null>(null);
   const [tab, setTab] = useState<Tab>("fila");
+  const [filter, setFilter] = useState<Filter>("todos");
+  const [newOrders, setNewOrders] = useState<string[]>([]);
+  const [connectionError, setConnectionError] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [pausing, setPausing] = useState(false);
-  async function refresh() {
-    try { setData(await api<AdminData>("admin")); setError(""); }
-    catch (problem) { setError(errorMessage(problem)); }
-  }
-  useEffect(() => {
-    void refresh();
-    const interval = setInterval(() => { if (!document.hidden) void refresh(); }, 6500);
-    return () => clearInterval(interval);
+  const read = useRef<AbortController | null>(null);
+  const seenNewOrders = useRef<Set<string> | null>(null);
+  const refresh = useCallback(async (replace = false) => {
+    if (read.current && !replace) return false;
+    read.current?.abort();
+    const request = new AbortController();
+    read.current = request;
+    try {
+      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(panelRequestTimeoutMs)]);
+      const next = await api<AdminData>("admin", undefined, signal);
+      if (request.signal.aborted) return false;
+      const current = new Set(next.orders.filter(order => order.payment === "aprovado" && order.stage === "recebido").map(order => order.id));
+      const previous = seenNewOrders.current;
+      const arrived = previous ? [...current].filter(id => !previous.has(id)) : [];
+      seenNewOrders.current = current;
+      setNewOrders(ids => [...ids.filter(id => current.has(id)), ...arrived]);
+      setData(next);
+      setConnectionError("");
+      setSessionExpired(false);
+      return true;
+    } catch (problem) {
+      if (request.signal.aborted) return false;
+      if (problem instanceof ApiError && problem.status === 403) {
+        setData(null);
+        setNewOrders([]);
+        seenNewOrders.current = null;
+        setSessionExpired(true);
+        setConnectionError("A sessão do painel terminou. Entre com uma conta autorizada.");
+      } else {
+        setConnectionError("O painel perdeu a conexão. Tente atualizar para sincronizar a fila.");
+      }
+      return false;
+    } finally {
+      if (read.current === request) read.current = null;
+    }
   }, []);
 
+  useEffect(() => {
+    const refreshVisible = () => { if (!document.hidden) void refresh(); };
+    const offline = () => {
+      read.current?.abort();
+      read.current = null;
+      setConnectionError("Sem conexão. O painel atualiza a fila quando a rede voltar.");
+    };
+    refreshVisible();
+    const interval = setInterval(refreshVisible, 6500);
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("online", refreshVisible);
+    window.addEventListener("offline", offline);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("online", refreshVisible);
+      window.removeEventListener("offline", offline);
+      read.current?.abort();
+      read.current = null;
+    };
+  }, [refresh]);
+
   async function save(path: string, body: Record<string, unknown>, message: string) {
-    await api(path, body);
-    await refresh();
-    setFeedback(message);
+    if (connectionError) throw new Error("Atualize o painel antes de repetir a ação.");
+    try {
+      await api(path, body, AbortSignal.timeout(panelRequestTimeoutMs));
+    } catch (problem) {
+      if (problem instanceof ApiError && [400, 403, 404, 409, 413, 415].includes(problem.status)) {
+        if (problem.status === 403 || problem.status === 409) await refresh(true);
+        throw problem;
+      }
+      const synced = await refresh(true);
+      throw new Error(synced
+        ? "A confirmação falhou. Confira o estado atualizado antes de repetir a ação."
+        : "A confirmação falhou. Atualize o painel antes de repetir a ação.");
+    }
+    const synced = await refresh(true);
+    setFeedback(synced ? message : `${message} Atualize o painel para sincronizar a fila.`);
   }
   async function pause() {
     if (!data) return;
+    setError("");
     setPausing(true);
     try { await save("admin/pausa", { paused: !data.config.paused }, data.config.paused ? "Pedidos retomados." : "Novos pedidos pausados."); }
     catch (problem) { setError(errorMessage(problem)); }
@@ -53,26 +120,43 @@ export default function Dashboard() {
   }
   useEffect(() => { if (feedback) { const id = setTimeout(() => setFeedback(""), 3500); return () => clearTimeout(id); } }, [feedback]);
 
+  function showTab(next: Tab) {
+    if (next !== tab) setFilter("todos");
+    setTab(next);
+    setFeedback("");
+    setError("");
+    window.scrollTo({ top: 0 });
+  }
+  const newOrderLabel = newOrders.length === 1 ? "1 novo pedido aprovado" : `${newOrders.length} novos pedidos aprovados`;
+
   return <div className="dashboard">
     <aside className="admin-sidebar">
       <Brand />
       <div className="admin-sidebar-caption">Painel da proprietária</div>
       <nav aria-label="Navegação do painel">
-        {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-current={id === tab ? "page" : undefined} className={id === tab ? "selected" : ""}
-          onClick={() => { setTab(id); setFeedback(""); }}><Icon size={19} /> {label}</button>)}
+        {tabs.map(({ id, label, short, icon: Icon }) => <button key={id} type="button" aria-label={label} aria-current={id === tab ? "page" : undefined} className={id === tab ? "selected" : ""}
+          onClick={() => showTab(id)}><Icon size={19} /><span className="admin-nav-label">{label}</span><span className="admin-nav-short">{short}</span></button>)}
       </nav>
-      <a className="admin-store" href="/">Abrir loja <ArrowUpRight size={16} /></a>
+      <div className="admin-side-actions">
+        {data?.config.paused && <span className="admin-paused"><CirclePause size={14} /> Pausado</span>}
+        <a className="admin-store" href="/">Abrir loja <ArrowUpRight size={16} /></a>
+      </div>
     </aside>
     <main className="admin-main">
       <div className="admin-top"><div><span className="eyebrow">Operação demonstrativa</span><h1>{tabs.find(t => t.id === tab)?.label}</h1></div>
-        {data && <button className={`button ${data.config.paused ? "button-primary" : "button-outline"}`} type="button" disabled={pausing} onClick={pause}>
+        {data && <button className={`button ${data.config.paused ? "button-primary" : "button-outline"}`} type="button" disabled={pausing || Boolean(connectionError)} onClick={pause}>
           {data.config.paused ? <CirclePlay size={19} /> : <CirclePause size={19} />} {data.config.paused ? "Retomar pedidos" : "Pausar pedidos"}
         </button>}</div>
-      {data?.config.paused && <p className="notice">Novos pedidos pausados. A fila existente segue disponível.</p>}
-      {error && <p className="notice notice-error" role="alert">{error} <button className="inline-action" onClick={refresh}>Atualizar</button></p>}
+      {data?.config.paused && <p className="notice" role="status">Novos pedidos pausados. A fila existente segue disponível.</p>}
+      {connectionError && <div className="notice notice-error admin-notice"><p role="alert">{connectionError} {data && "Exibindo a última atualização."}</p>
+        <button className="button button-outline" type="button" onClick={() => sessionExpired ? window.location.reload() : void refresh(true)}>{sessionExpired ? "Reabrir painel" : "Atualizar painel"}</button></div>}
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
       {feedback && <p className="admin-feedback" role="status"><Check size={17} /> {feedback}</p>}
-      {!data ? !error && <p className="muted" role="status">Carregando operação…</p> : <>
-        {tab === "fila" && <Queue orders={data.orders} history={data.history} save={save} />}
+      <p className="sr-only" role="status">{newOrders.length > 0 ? newOrderLabel : ""}</p>
+      {newOrders.length > 0 && <div className="notice admin-notice"><p aria-hidden="true"><Bell size={17} /> {newOrderLabel}</p>
+        <button className="button button-outline" type="button" onClick={() => { showTab("fila"); setFilter("todos"); setNewOrders([]); }}>Ver na fila</button></div>}
+      {!data ? !connectionError && <p className="muted" role="status">Carregando operação…</p> : <>
+        {tab === "fila" && <Queue orders={data.orders} history={data.history} filter={filter} onFilter={setFilter} stale={Boolean(connectionError)} save={save} />}
         {tab === "catalogo" && <CatalogEditor products={data.products} save={save} />}
         {tab === "operacao" && <Operation config={data.config} save={save} />}
         {tab === "metricas" && <MetricsPanel metrics={data.metrics} />}
@@ -84,8 +168,9 @@ export default function Dashboard() {
 
 type Save = (path: string, body: Record<string, unknown>, message: string) => Promise<void>;
 type Filter = "todos" | "recebido" | "em_preparo" | "pronto" | "pendente" | "historico";
-function Queue({ orders, history, save }: { orders: Order[]; history: Order[]; save: Save }) {
-  const [filter, setFilter] = useState<Filter>("todos");
+function Queue({ orders, history, filter, onFilter, stale, save }: {
+  orders: Order[]; history: Order[]; filter: Filter; onFilter: (filter: Filter) => void; stale: boolean; save: Save;
+}) {
   const counts = {
     recebido: orders.filter(order => order.payment === "aprovado" && order.stage === "recebido").length,
     em_preparo: orders.filter(order => order.stage === "em_preparo").length,
@@ -102,28 +187,31 @@ function Queue({ orders, history, save }: { orders: Order[]; history: Order[]; s
   return <>
     <div className="queue-stats"><Stat title="Novos" value={counts.recebido} /><Stat title="Em preparo" value={counts.em_preparo} /><Stat title="Prontos" value={counts.pronto} /></div>
     <div className="admin-filters" aria-label="Filtrar fila">
-      {filterList.map(f => <button className={`category-pill ${filter === f.id ? "active" : ""}`} key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.name} <small>{f.count}</small></button>)}
+      {filterList.map(f => <button className={`category-pill ${filter === f.id ? "active" : ""}`} key={f.id} aria-pressed={filter === f.id} onClick={() => onFilter(f.id)}>{f.name} <small>{f.count}</small></button>)}
     </div>
-    {visible.length ? <div className="queue-grid">{visible.map(order => <QueueCard key={order.id} order={order} save={save} />)}</div> :
+    {visible.length ? <div className="queue-grid">{visible.map(order => <QueueCard key={order.id} order={order} stale={stale} save={save} />)}</div> :
       <Empty title={filter === "historico" ? "Histórico vazio" : "Nenhum pedido nesta fila"}>{filter === "historico" ? "Pedidos concluídos e cancelados dos últimos sete dias aparecem aqui." : <>Registre um pedido de teste na <a href="/#cardapio">loja</a> para ver a fila em ação.</>}</Empty>}
   </>;
 }
 
-function QueueCard({ order, save }: { order: Order; save: Save }) {
+function QueueCard({ order, stale, save }: { order: Order; stale: boolean; save: Save }) {
   const [code, setCode] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   const canMove = order.payment === "aprovado" && ["recebido", "em_preparo", "pronto"].includes(order.stage);
   const canCancel = canMove || (order.stage === "recebido" && order.payment === "pendente");
   async function action(action: string, label: string) {
+    if (sending.current || stale) return;
+    sending.current = true;
     setBusy(true); setError("");
     try { await save(`admin/pedido/${order.id}`, { action, code }, label); setConfirm(false); }
     catch (problem) { setError(errorMessage(problem)); }
-    finally { setBusy(false); }
+    finally { sending.current = false; setBusy(false); }
   }
   return <article className="panel queue-card">
-    <div className="queue-card-top"><div><small>{orderLabel(order.id)}</small><h2>{order.customer}</h2></div><span className={`state-badge stage-${order.stage}`}>{stages[order.stage]}</span></div>
+    <div className="queue-card-top"><div><small>{orderLabel(order.id)}</small><h2>{order.customer}</h2></div><span className={`state-badge stage-${order.payment === "pendente" ? "pendente" : order.stage}`}>{order.payment === "pendente" ? "Reserva pendente" : stages[order.stage]}</span></div>
     <p className="queue-time"><CalendarClock size={17} /> {dayLabel(order.slot)} · {windowLabel(order.slot)} <span>{order.pickup === "agendada" ? "Agendado" : "Próxima vaga"}</span></p>
     <div className="queue-financial"><span>{order.method} de teste</span><strong>{payments[order.payment]}</strong></div>
     <OrderItems order={order} />
@@ -133,14 +221,14 @@ function QueueCard({ order, save }: { order: Order; save: Save }) {
       <ul>{order.events.map((event, i) => <li key={i}><time>{time(event.at)}</time> {event.label}</li>)}</ul>
     </details>}
     {canMove && <div className="queue-actions">
-      {order.stage === "recebido" && <button className="button button-primary full" disabled={busy} onClick={() => action("start", "Preparo iniciado.")}><CirclePlay size={19} /> Iniciar preparo</button>}
-      {order.stage === "em_preparo" && <button className="button button-primary full" disabled={busy} onClick={() => action("ready", "Pedido pronto para retirada.")}><Check size={19} /> Marcar pronto</button>}
+      {order.stage === "recebido" && <button className="button button-primary full" disabled={busy || stale} onClick={() => action("start", "Preparo iniciado.")}><CirclePlay size={19} /> Iniciar preparo</button>}
+      {order.stage === "em_preparo" && <button className="button button-primary full" disabled={busy || stale} onClick={() => action("ready", "Pedido pronto para retirada.")}><Check size={19} /> Marcar pronto</button>}
       {order.stage === "pronto" && <form className="pickup-form" onSubmit={event => { event.preventDefault(); void action("pickup", "Retirada confirmada."); }}>
         <label className="field"><span>Código mostrado pelo cliente</span><input value={code} onChange={event => setCode(event.target.value.toUpperCase())} minLength={5} maxLength={5} required placeholder="Código de 5 caracteres" autoComplete="off" autoCapitalize="characters" spellCheck={false} /></label>
-        <button className="button button-primary full" disabled={busy}><TicketCheck size={19} /> Confirmar retirada</button></form>}
+        <button className="button button-primary full" disabled={busy || stale || code.trim().length !== 5}><TicketCheck size={19} /> Confirmar retirada</button></form>}
     </div>}
     {error && <p className="notice notice-error" role="alert">{error}</p>}
-    {canCancel && (confirm ? <div className="notice cancel-confirm"><span>Cancelar este pedido de teste?</span><button className="inline-action" disabled={busy} onClick={() => action("cancel", "Pedido cancelado.")}>Confirmar cancelamento</button><button className="inline-action" onClick={() => setConfirm(false)}>Voltar</button></div>
+    {canCancel && (confirm ? <div className="notice cancel-confirm"><span>Cancelar este pedido de teste?</span><button className="inline-action" disabled={busy || stale} onClick={() => action("cancel", "Pedido cancelado.")}>Confirmar cancelamento</button><button className="inline-action" onClick={() => setConfirm(false)}>Voltar</button></div>
       : <button className="inline-action danger" onClick={() => setConfirm(true)}>Cancelar pedido</button>)}
   </article>;
 }

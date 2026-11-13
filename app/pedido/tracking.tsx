@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock3, Copy, CreditCard, Receipt, TicketCheck } from "lucide-react";
 import { type Order, dayLabel, money, orderLabel, payments, stages, steps, time, windowLabel } from "@/lib/federal";
 import { api, errorMessage, rememberedOrders, rememberOrder, type RememberedOrder } from "@/lib/client";
@@ -10,7 +10,10 @@ export function OrderHistory() {
   const [list, setList] = useState<RememberedOrder[]>([]);
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
-  useEffect(() => setList(rememberedOrders()), []);
+  useEffect(() => {
+    const hydrate = setTimeout(() => setList(rememberedOrders()), 0);
+    return () => clearTimeout(hydrate);
+  }, []);
   function lookup(event: FormEvent) {
     event.preventDefault();
     const token = value.trim().match(/(?:^|\/pedido\/)([a-f0-9]{32})(?:\/?(?:[?#].*)?)$/i)?.[1];
@@ -39,12 +42,13 @@ export function Tracking({ token }: { token: string }) {
   const read = useRef<AbortController | null>(null);
   const sending = useRef(false);
   const terminal = order?.stage === "cancelado" || order?.stage === "retirado";
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (sending.current || read.current) return;
     const controller = new AbortController();
     read.current = controller;
     try {
-      const result = await api<Order>(`pedido/${encodeURIComponent(token)}`, undefined, controller.signal);
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+      const result = await api<Order>(`pedido/${encodeURIComponent(token)}`, undefined, signal);
       if (!controller.signal.aborted) { setOrder(result); rememberOrder(result); setError(""); }
     } catch (problem) {
       if (!controller.signal.aborted) setError(errorMessage(problem));
@@ -52,13 +56,23 @@ export function Tracking({ token }: { token: string }) {
       if (read.current === controller) read.current = null;
       if (!controller.signal.aborted) setLoading(false);
     }
-  }
+  }, [token]);
   useEffect(() => {
     if (terminal) return;
-    void refresh();
-    const interval = setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
-    return () => { clearInterval(interval); read.current?.abort(); read.current = null; };
-  }, [token, terminal]);
+    const refreshVisible = () => { if (!document.hidden) void refresh(); };
+    const initial = setTimeout(() => { void refresh(); }, 0);
+    const interval = setInterval(refreshVisible, 5000);
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("online", refreshVisible);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("online", refreshVisible);
+      read.current?.abort();
+      read.current = null;
+    };
+  }, [refresh, terminal]);
   async function payment(action: string) {
     if (sending.current) return;
     sending.current = true;

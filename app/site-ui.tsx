@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, Beef, CupSoda, LayoutGrid, MapPin, Menu, PackageOpen,
   ShoppingBag, Sandwich, Shapes, Truck, X,
@@ -77,9 +77,10 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   return <div className="empty"><PackageOpen size={28} aria-hidden="true" /><strong>{title}</strong>{children && <p>{children}</p>}</div>;
 }
 
+const subscribeToOrigin = () => () => {};
+
 export function Campaign({ standalone = false }: { standalone?: boolean }) {
-  const [published, setPublished] = useState(false);
-  useEffect(() => { setPublished(window.location.origin === demoUrl); }, []);
+  const published = useSyncExternalStore(subscribeToOrigin, () => window.location.origin === demoUrl, () => false);
   return <section className={`campaign ${standalone ? "campaign-standalone" : ""}`} aria-labelledby="campaign-title">
     <div className="campaign-content">
       <span className="campaign-brand">Food Truck Federal</span>

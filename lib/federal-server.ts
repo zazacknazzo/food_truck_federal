@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import {
-  type CartLine, type Config, type Item, type Metrics, type Order, type Payment,
+  type CartLine, type Config, type Item, type Metrics, type Order,
   type Product, type PublishedSubmission, type Slot, type Stage, type Submission,
   dateKey, defaultConfig, extrasFor, originalProducts, payments, slotMs, students, time, zone,
 } from "./federal";
@@ -312,7 +312,9 @@ export async function adminState() {
   const { config, products } = await storeContext();
   const [queue, recent, occupancy] = await db.batch([
     db.prepare(`SELECT * FROM orders WHERE stage IN ('recebido','em_preparo','pronto')
-      ORDER BY slot ASC, created_at ASC LIMIT 300`),
+      ORDER BY (payment='pendente') ASC, slot ASC,
+        CASE stage WHEN 'pronto' THEN 0 WHEN 'em_preparo' THEN 1 ELSE 2 END,
+        created_at ASC, id ASC LIMIT 300`),
     db.prepare("SELECT * FROM orders WHERE created_at >= ? ORDER BY created_at DESC").bind(now - 7 * 24 * 60 * 60_000),
     db.prepare(`SELECT slot, COUNT(*) as count FROM orders WHERE slot >= ? AND ${occupancyWhere}
       GROUP BY slot ORDER BY slot LIMIT 24`).bind(Math.floor(now / slotMs) * slotMs, now),

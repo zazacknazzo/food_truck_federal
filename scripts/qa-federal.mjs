@@ -46,6 +46,71 @@ function checkoutDraft(overrides = {}) {
 function order(overrides = {}) {
   return { ...checkoutDraft(overrides), requestKey: crypto.randomUUID() };
 }
+
+async function checkPeak(config, window, laterWindow) {
+  await call("admin/operacao", { ...config, capacity: 10, overrides: [] }, operator);
+  const scheduled = overrides => order({ pickup: "agendada", slot: window, scenario: "pendente", ...overrides });
+  const firstRequest = scheduled({ customer: "Pico · reserva original" });
+  const original = await call("pedido", firstRequest);
+  const otherWindow = await call("pedido", scheduled({ slot: laterWindow, scenario: "aprovado" }));
+  const requests = [
+    ...Array.from({ length: 16 }, (_, index) => scheduled({ customer: `Pico · pedido ${index + 1}` })),
+    ...Array.from({ length: 8 }, () => firstRequest),
+  ];
+  const responses = await Promise.all(requests.map(async request => {
+    const start = performance.now();
+    const response = await raw("pedido", request);
+    const body = await response.json();
+    return { status: response.status, body, elapsed: performance.now() - start };
+  }));
+  const newResponses = responses.slice(0, 16);
+  assert.deepEqual(newResponses.map(r => r.status).sort(), [...Array(9).fill(200), ...Array(7).fill(409)]);
+  assert.ok(responses.slice(16).every(r => r.status === 200 && r.body.id === original.id && r.body.tracking === original.tracking));
+  const accepted = newResponses.filter(r => r.status === 200).map(r => r.body);
+  const { orders, metrics } = await call("admin", undefined, operator);
+  assert.equal(orders.filter(o => o.slot === window).length, 10);
+  assert.equal(new Set([original.id, ...accepted.map(o => o.id)]).size, 10);
+  assert.equal((await call("horarios")).slots.find(s => s.start === window).remaining, 0);
+  assert.deepEqual(metrics.occupancy.find(s => s.start === window), { start: window, count: 10, capacity: 10 });
+  const times = responses.map(r => r.elapsed).sort((a, b) => a - b);
+  const percentile = n => Math.round(times[Math.ceil(times.length * n) - 1]);
+  console.log(`Pico (24 requisições): 9 novas reservas, 7 conflitos e 8 reenvios. Latência local p50 ${percentile(.5)} ms, p95 ${percentile(.95)} ms, máx. ${percentile(1)} ms.`);
+
+  const [ready, preparing, waiting] = accepted;
+  for (const entry of [ready, preparing, waiting]) {
+    await call("pagamento-demo/" + entry.tracking, { mode: "demo", action: "aprovado" });
+  }
+  const start = entry => raw("admin/pedido/" + entry.id, { action: "start" }, operator);
+  const doubleStart = await Promise.all([start(ready), start(ready)]);
+  assert.deepEqual(doubleStart.map(r => r.status).sort(), [200, 409]);
+  await call("admin/pedido/" + ready.id, { action: "ready" }, operator);
+  assert.equal((await start(preparing)).status, 200);
+  const afterStart = (await call("admin", undefined, operator)).orders;
+  const peakQueue = afterStart.filter(o => o.slot === window);
+  assert.deepEqual(peakQueue.slice(0, 3).map(o => o.id), [ready.id, preparing.id, waiting.id]);
+  assert.ok(peakQueue.slice(3).every(o => o.payment === "pendente"));
+  const ordered = afterStart.filter(o => o.payment === "aprovado" && [window, laterWindow].includes(o.slot));
+  assert.equal(ordered.at(-1).id, otherWindow.id);
+  assert.equal((await call("pedido/" + ready.tracking)).stage, "pronto");
+
+  await call("admin/pausa", { paused: true }, operator);
+  assert.equal((await call("horarios")).slots.length, 0);
+  await call("pedido", scheduled({ slot: laterWindow }), undefined, 409);
+  assert.equal((await call("pedido", firstRequest)).id, original.id);
+  const code = (await call("pedido/" + ready.tracking)).code;
+  await call("admin/pedido/" + ready.id, { action: "pickup", code }, operator);
+  assert.equal((await call("pedido/" + ready.tracking)).stage, "retirado");
+  await call("admin/pausa", { paused: false }, operator);
+
+  const db = await worker.getD1Database("DB");
+  await db.prepare("UPDATE orders SET expires_at=? WHERE id=?").bind(Date.now() - 1_000, original.id).run();
+  assert.equal((await call("horarios")).slots.find(s => s.start === window).remaining, 1);
+  assert.equal((await call("pedido/" + original.tracking)).payment, "expirado");
+  assert.equal((await call("pedido", scheduled({ customer: "Pico · vaga liberada" }))).slot, window);
+  assert.equal((await call("horarios")).slots.find(s => s.start === window).remaining, 0);
+  console.log("Pico: fila por prioridade, transição concorrente, pausa, retirada e reutilização de vaga expirada.");
+}
+
 try {
   const db = await worker.getD1Database("DB");
   const migrations = (await readdir("drizzle")).filter(file => file.endsWith(".sql")).sort();
@@ -70,7 +135,18 @@ try {
   assert.ok(slots.length > 50 && slots.every(s=>s.capacity===10 && s.start%900000===0));
   await call("admin",undefined,{},403);
   await call("admin/pausa",{paused:true},viewer,403);
+  for (const identity of [{}, viewer, { "oai-authenticated-user-email": operator["oai-authenticated-user-email"] }, { "oai-authenticated-user-id": operator["oai-authenticated-user-id"] }]) {
+    await call("admin", undefined, identity, 403);
+    await call("admin/pausa", { paused: true }, identity, 403);
+    await call("admin/pedido/not-an-order", { action: "start" }, identity, 403);
+    assert.equal((await raw("admin/upload", new Uint8Array(24), identity, "image/webp")).status, 403);
+  }
   await call("admin/pausa",{paused:true},{...operator,origin:"https://outro.federal.qa"},403);
+  await call("admin/pausa", { paused: true }, { ...operator, "sec-fetch-site": "cross-site" }, 403);
+  const panel = headers => worker.dispatchFetch("https://federal.qa/painel", { headers });
+  assert.match(await (await panel({})).text(), /Entrar com ChatGPT/);
+  assert.doesNotMatch(await (await panel(viewer)).text(), /Fila de pedidos/);
+  assert.match(await (await panel(operator)).text(), /Operação demonstrativa/);
   await call("admin/pausa/falso/extra",{paused:true},operator,404);
   await call("pedido",{extra:"a".repeat(61_000)},undefined,413);
   const { config } = await call("admin",undefined,operator);
@@ -179,6 +255,7 @@ try {
   await call("admin/operacao",{...config,overrides:[{...rule,capacity:0}]},operator);
   assert.ok(!(await call("horarios")).slots.some(s=>s.start===capSlot));
   console.log("Agenda, última vaga concorrente, reserva, aprovação, reembolso, recusa e expiração");
+  await checkPeak(config, slots[18].start, slots[19].start);
 
   await call("admin/pausa",{paused:true},operator);
   assert.equal((await call("horarios")).slots.length,0);

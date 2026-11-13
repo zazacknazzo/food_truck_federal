@@ -345,11 +345,18 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
 .admin-sidebar nav button { background: transparent; color: var(--cream); border: 0; border-radius: 8px; min-height: 44px; display: flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 750; white-space: nowrap; padding: 9px; text-align: left; }
 .admin-sidebar nav button:hover { background: #553830; }
 .admin-sidebar nav button.selected { background: var(--red); }
-.admin-store { display: flex; align-items: center; gap: 7px; width: fit-content; font-weight: 800; color: var(--yellow); font-size: 14px; padding: 7px; margin-top: auto; }
+.admin-nav-short { display: none; }
+.admin-side-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; margin-top: auto; }
+.admin-store { display: flex; align-items: center; gap: 7px; min-height: 44px; width: fit-content; font-weight: 800; color: var(--yellow); font-size: 14px; padding: 7px; }
+.admin-paused { display: inline-flex; gap: 4px; align-items: center; border-radius: 6px; background: var(--yellow); color: var(--ink); padding: 4px 6px; font-size: 12px; font-weight: 800; }
 .admin-main { max-width: 1310px; width: 100%; min-width: 0; padding: 27px clamp(17px, 4vw, 47px) 47px; }
 .admin-top { display: flex; justify-content: space-between; align-items: end; gap: 9px; margin-bottom: 19px; }
 .admin-top h1 { font-size: clamp(46px, 6.5vw, 73px); }
 .admin-main > .notice { margin-bottom: 10px; }
+.admin-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.admin-notice p { display: flex; align-items: center; gap: 6px; }
+.admin-notice p svg { flex: none; }
+.admin-notice .button { min-height: 44px; }
 .admin-feedback { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--green); background: #e5eee0; border-radius: 8px; padding: 9px 11px; font-size: 14px; font-weight: 800; }
 .queue-stats, .metrics-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-bottom: 12px; }
 .stat { display: grid; align-content: start; gap: 4px; padding: 12px 13px; }
@@ -360,6 +367,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
 .queue-grid, .metrics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
 .queue-card-top small { color: var(--muted); font-size: 11px; font-weight: 800; }
 .queue-card-top h2 { margin: 3px 0 0; overflow-wrap: anywhere; }
+.queue-card .stage-pendente { background: var(--oat); color: var(--muted); border: 1px solid var(--line); }
 .queue-time { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--wine); font-size: 13px; font-weight: 750; margin: 8px 0; }
 .queue-time span { border: 1px solid var(--line); border-radius: 20px; padding: 2px 5px; font-size: 10px; color: var(--muted); }
 .queue-financial { background: var(--oat); padding: 6px 8px; border-radius: 6px; display: flex; justify-content: space-between; gap: 7px; font-size: 13px; }
@@ -372,6 +380,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
 .pickup-form { display: grid; gap: 6px; }
 .pickup-form input { text-transform: uppercase; letter-spacing: .12em; }
 .pickup-form input::placeholder { text-transform: none; letter-spacing: 0; }
+.queue-card .danger { min-height: 44px; }
 .cancel-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; margin-top: 7px; }
 .admin-catalog-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 .product-table { padding-block: 4px; }
@@ -421,9 +430,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
   .admin-sidebar { min-height: 0; position: sticky; z-index: 9; padding: 11px 16px 8px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; }
   .admin-sidebar .brand { margin-left: 0; }
   .admin-sidebar-caption { display: none; }
-  .admin-sidebar nav { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 5px; overflow: auto; scrollbar-width: thin; padding-bottom: 2px; }
-  .admin-sidebar nav button { min-height: 40px; padding-inline: 8px; }
-  .admin-store { grid-row: 1; grid-column: 2; margin: 0; }
+  .admin-sidebar nav { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
+  .admin-sidebar nav button { min-height: 48px; justify-content: center; flex-direction: column; gap: 3px; padding: 5px 2px; font-size: 11px; }
+  .admin-sidebar nav button svg { width: 17px; height: 17px; }
+  .admin-nav-label { display: none; }
+  .admin-nav-short { display: inline; }
+  .admin-side-actions { grid-row: 1; grid-column: 2; margin: 0; justify-content: end; }
+  .admin-store { font-size: 12px; gap: 4px; padding-inline: 4px; }
 }
 @media (max-width: 640px) {
   :root { --shell: calc(100% - 32px); }
@@ -515,6 +528,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
   .direction span { font-size: 11px; }
   .submission-grid, .queue-grid, .metrics-grid { grid-template-columns: 1fr; }
   .admin-main { padding: 15px 13px 36px; }
+  .admin-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-inline: 0; padding-inline: 0; }
+  .admin-filters .category-pill { justify-content: center; min-height: 44px; padding-inline: 4px; gap: 4px; font-size: 12px; }
+  .pickup-form input { font-size: 16px; }
+  .product-row .button { min-height: 44px; }
   .admin-top { align-items: start; gap: 7px; }
   .admin-top .button { min-height: 44px; font-size: 12px; padding-inline: 7px; gap: 4px; }
   .admin-top .button svg { width: 15px; }

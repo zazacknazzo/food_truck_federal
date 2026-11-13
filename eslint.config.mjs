@@ -14,6 +14,14 @@ const eslintConfig = defineConfig([
     "work/**",
   ]),
   {
+    files: ["app/**/*.{ts,tsx}"],
+    rules: {
+      // Keep Vinext document navigation for the storefront, tracking and authenticated panel.
+      "@next/next/no-html-link-for-pages": "off",
+      "@next/next/no-location-assign-relative-destination": "off",
+    },
+  },
+  {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
       // These files are vendored verbatim from shadcn@4.17.0. Keep the

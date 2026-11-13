@@ -43,11 +43,13 @@ export default function Home() {
   }
 
   useEffect(() => {
-    setCart(readCart(cartKey));
-    setCampaign(captureCampaign());
-    void syncStore();
+    const hydrate = setTimeout(() => {
+      setCart(readCart(cartKey));
+      setCampaign(captureCampaign());
+      void syncStore();
+    }, 0);
     const timer = setInterval(() => { if (!document.hidden) void syncStore(); }, 15_000);
-    return () => clearInterval(timer);
+    return () => { clearTimeout(hydrate); clearInterval(timer); };
   }, []);
   useEffect(() => {
     if (!toast) return;
@@ -275,7 +277,7 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   async function fetchSlots() {
     setLoading(true);
     try {
-      const data = await api<{ slots: Slot[]; paused: boolean }>("horarios");
+      const data = await api<{ slots: Slot[]; paused: boolean }>("horarios", undefined, AbortSignal.timeout(10_000));
       setPaused(data.paused);
       setSlots(data.slots);
       setScheduleError("");
@@ -283,7 +285,10 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void fetchSlots(); }, []);
+  useEffect(() => {
+    const initial = setTimeout(() => { void fetchSlots(); }, 0);
+    return () => clearTimeout(initial);
+  }, []);
   const days = useMemo(() => [...new Map(slots.map(s => [dateKey(s.start), dayLabel(s.start)])).entries()], [slots]);
   const next = slots.find(s => s.remaining > 0);
   const activeDay = day || (next ? dateKey(next.start) : days[0]?.[0]) || "";
@@ -352,7 +357,7 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
       {retry ? (retry.slot !== null && <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(retry.slot)} · {windowLabel(retry.slot)}</strong><small>Janela do envio anterior</small></div></div>) :
         loading ? <p className="muted" role="status">Buscando janelas de retirada…</p> :
         paused ? <p className="notice">A Kombi pausou novos pedidos.</p> :
-        scheduleError ? <p className="notice notice-error" role="alert">{scheduleError} <button type="button" className="inline-action" onClick={fetchSlots}>Recarregar horários</button></p> :
+        scheduleError ? <p className="notice notice-error" role="alert">{scheduleError} <button type="button" className="inline-action" onClick={() => fetchSlots()}>Recarregar horários</button></p> :
         !next ? <p className="notice">Nenhuma vaga disponível nos próximos sete dias.</p> :
         pickup === "imediata" ? <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(next.start)} · {windowLabel(next.start)}</strong><small>Janela estimada para retirada · horário de São Paulo</small></div></div> :
         <>
