@@ -64,7 +64,7 @@ Se a proprietária não conseguir entrar pelo ChatGPT Sites, mantenha o painel r
 | `npm run lint` | Zero erros e 11 avisos sobre imagens `<img>`. |
 | `node scripts/qa-federal.mjs` | Passou com 38 produtos, idempotência, autorização, migrações, pausa, estoque, D1, R2 e fluxo até retirada. O pico de 24 requisições gerou nove novas reservas, sete conflitos por lotação e oito reenvios da reserva original. A janela ficou com 10 pedidos contando a reserva inicial. |
 | `node scripts/qa-mercado-pago.mjs` | Passou em Worker local com provedor simulado. Seis solicitações concorrentes de preferência geraram um POST. Doze pedidos disputaram uma vaga e apenas um a reservou. Cobriu assinatura inválida, entregas duplicadas e fora de ordem, divergências, aprovação tardia, estorno, falhas de comunicação, conciliação e bloqueio da produção. |
-| Navegador móvel a 360 e 390 px | Em DEMO, pedido personalizado, preparo, retirada por código, acompanhamento e métricas. Em TESTE local, retirada agendada, reserva sem liberação de preparo, link de pagamento na interface e recuperação após fim de sessão. |
+| Navegador móvel a 360 e 390 px | Em DEMO, pedido personalizado, preparo, retirada por código, acompanhamento e métricas. Em TESTE local, retirada agendada, reserva sem liberação de preparo, link de pagamento na interface e recuperação após fim de sessão. O selo de estado quebra para outra linha quando falta espaço no acompanhamento. |
 
 Os dados e as respostas financeiras foram isolados no ambiente de teste. A homologação com contas do Mercado Pago e o acesso da proprietária pelo celular dela continuam pendentes.
 

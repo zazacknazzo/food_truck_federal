@@ -364,12 +364,13 @@ function Stat({ title, value }: { title: string; value: ReactNode }) {
 }
 
 function MetricsPanel({ metrics, mode }: { metrics: Metrics; mode: Mode }) {
+  const paymentScope = mode === "producao" ? "" : " de teste";
   return <>
     <p className="muted metrics-caption">Últimos sete dias · {modes[mode]}</p>
     <div className="metrics-stats"><Stat title="Pedidos registrados" value={metrics.count} /><Stat title="Pagamentos aprovados" value={metrics.approved} /><Stat title="Valor aprovado" value={money(metrics.value)} /><Stat title="Ticket médio" value={money(metrics.average)} /></div>
     <div className="metrics-grid">
-      <div className="panel"><h2>Itens mais pedidos</h2>{metrics.top.length ? <div className="bar-list">{metrics.top.map(item => <div key={item.name}><div><strong>{item.name}</strong><span>{item.quantity}</span></div><progress aria-label={item.name} value={item.quantity} max={metrics.top[0].quantity} /></div>)}</div> : <p className="muted">Os pedidos aprovados de teste vão aparecer aqui.</p>}</div>
-      <div className="panel"><h2>Ocupação por janela</h2>{metrics.occupancy.length ? <div className="bar-list">{metrics.occupancy.map(window => <div key={window.start}><div><strong>{dayLabel(window.start)} · {windowLabel(window.start)}</strong><span>{window.count}/{window.capacity}</span></div><progress aria-label={windowLabel(window.start)} value={window.count} max={Math.max(window.capacity, window.count)} /></div>)}</div> : <p className="muted">Nenhuma janela futura com reservas de teste.</p>}</div>
+      <div className="panel"><h2>Itens mais pedidos</h2>{metrics.top.length ? <div className="bar-list">{metrics.top.map(item => <div key={item.name}><div><strong>{item.name}</strong><span>{item.quantity}</span></div><progress aria-label={item.name} value={item.quantity} max={metrics.top[0].quantity} /></div>)}</div> : <p className="muted">Os pedidos aprovados{paymentScope} vão aparecer aqui.</p>}</div>
+      <div className="panel"><h2>Ocupação por janela</h2>{metrics.occupancy.length ? <div className="bar-list">{metrics.occupancy.map(window => <div key={window.start}><div><strong>{dayLabel(window.start)} · {windowLabel(window.start)}</strong><span>{window.count}/{window.capacity}</span></div><progress aria-label={windowLabel(window.start)} value={window.count} max={Math.max(window.capacity, window.count)} /></div>)}</div> : <p className="muted">Nenhuma janela futura com reservas{paymentScope}.</p>}</div>
       <div className="panel"><h2><Clock3 size={21} /> Tempo médio de preparo</h2><p className="metric-value">{metrics.prepMinutes === null ? "Sem medições" : `${metrics.prepMinutes.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} min`}</p><p className="muted">Do início do preparo ao momento em que o pedido fica pronto.</p></div>
     </div>
   </>;

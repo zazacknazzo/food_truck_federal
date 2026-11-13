@@ -271,6 +271,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
 .tracking-summary { grid-area: summary; }
 .tracking-progress > p, .pickup-ticket p { color: var(--muted); margin-bottom: 12px; }
 .progress-title, .queue-card-top, .submission-head { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+.progress-title { flex-wrap: wrap; align-items: center; }
 .state-badge { border-radius: 99px; padding: 5px 9px; display: inline-block; font-weight: 800; font-size: 11px; color: #693d21; background: #f5e4c8; white-space: nowrap; }
 .stage-em_preparo { background: #f8dfca; color: #743221; }
 .stage-pronto, .stage-retirado { background: #deeedf; color: #20563c; }
