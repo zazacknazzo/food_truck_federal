@@ -1,5 +1,11 @@
 import { originalProducts, type CartLine, type Order } from "./federal";
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 export async function api<T>(path: string, body?: Record<string, unknown> | File, signal?: AbortSignal): Promise<T> {
   const headers = body ? { "Content-Type": body instanceof File ? body.type : "application/json" } : undefined;
   const response = await fetch(`/api/${path}`, {
@@ -7,7 +13,7 @@ export async function api<T>(path: string, body?: Record<string, unknown> | File
     body: body instanceof File ? body : body ? JSON.stringify(body) : undefined,
   });
   const result = await response.json().catch(() => null) as { error?: string } | null;
-  if (!response.ok) throw new Error(result?.error ?? "A conexão com a Kombi falhou. Tente novamente.");
+  if (!response.ok) throw new ApiError(response.status, result?.error ?? "A conexão com a Kombi falhou. Tente novamente.");
   if (result === null) throw new Error("A conexão com a Kombi falhou. Tente novamente.");
   return result as T;
 }
@@ -31,11 +37,6 @@ export function readCart(key: string): CartLine[] {
     && typeof line.variant === "string" && typeof line.press === "string" && typeof line.note === "string"
     && Array.isArray(line.extras) && line.extras.every((extra: unknown) => typeof extra === "string")
     && Number.isInteger(line.quantity) && line.quantity >= 1 && line.quantity <= 15).slice(0, 30);
-}
-
-export async function checkoutRequestKey(draft: Record<string, unknown>) {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(draft)));
-  return Array.from(new Uint8Array(hash).slice(0, 16), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export type RememberedOrder = { tracking: string; id: string; created_at: number };

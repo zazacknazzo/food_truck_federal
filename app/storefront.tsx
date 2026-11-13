@@ -9,10 +9,12 @@ import {
   type CartLine, type Method, type Order, type Pickup, type Product, type Scenario, type Slot,
   categories, dateKey, dayLabel, extrasFor, featured, linePrice, money, normalize, originalProducts, payments, windowLabel,
 } from "@/lib/federal";
-import { api, captureCampaign, checkoutRequestKey, errorMessage, readCart, rememberOrder, writeLocal } from "@/lib/client";
+import { ApiError, api, captureCampaign, errorMessage, readCart, rememberOrder, writeLocal } from "@/lib/client";
+import { finishCheckoutAttempt, pendingCheckoutAttempt, startCheckoutAttempt, type CheckoutRequest } from "@/lib/checkout-attempt.mjs";
 import { Campaign, CategoryIcon, Empty, LocationLink, Modal, SiteFooter, SiteHeader } from "./site-ui";
 
 const cartKey = "federal-sacola-v1";
+const checkoutResponseTimeoutMs = 20_000;
 type Pane = "bag" | "checkout" | "product" | null;
 
 export default function Home() {
@@ -190,7 +192,7 @@ export default function Home() {
         onDone={order => {
           rememberOrder(order);
           if (order.payment === "aprovado" || order.payment === "pendente") changeCart([]);
-          else changeCart(cart.map(line => ({ ...line, key: crypto.randomUUID() })));
+          setPane(null);
           window.location.assign(`/pedido/${order.tracking}`);
         }} />
     </Modal>}
@@ -255,16 +257,17 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   cart: CartLine[]; total: number; campaign: string | null; onBack: () => void; onBusy: (value: boolean) => void;
   onDone: (order: Order) => void; onChange: () => Promise<void>;
 }) {
-  const [pickup, setPickup] = useState<Pickup>("imediata");
+  const [retry, setRetry] = useState<CheckoutRequest | null>(() => pendingCheckoutAttempt(cart));
+  const [pickup, setPickup] = useState<Pickup>(retry?.pickup ?? "imediata");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [paused, setPaused] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scheduleError, setScheduleError] = useState("");
-  const [day, setDay] = useState("");
-  const [slot, setSlot] = useState<number | null>(null);
-  const [name, setName] = useState("");
-  const [method, setMethod] = useState<Method>("Pix");
-  const [scenario, setScenario] = useState<Scenario>("aprovado");
+  const [day, setDay] = useState(retry?.slot ? dateKey(retry.slot) : "");
+  const [slot, setSlot] = useState<number | null>(retry?.slot ?? null);
+  const [name, setName] = useState(retry?.customer ?? "");
+  const [method, setMethod] = useState<Method>(retry?.method ?? "Pix");
+  const [scenario, setScenario] = useState<Scenario>(retry?.scenario ?? "aprovado");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
@@ -289,43 +292,76 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
   const chosen = pickup === "imediata" ? next : activeSlot && activeSlot.remaining > 0 ? activeSlot : undefined;
   const unavailableSlot = pickup === "agendada" && slot !== null && !chosen;
 
+  const canSend = Boolean(retry || (chosen && !loading && !paused && !scheduleError));
+  const lockFields = busy || Boolean(retry);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!chosen || sending.current) return;
+    if (!canSend || sending.current) return;
     sending.current = true;
-    if (pickup === "agendada") { setDay(activeDay); setSlot(chosen.start); }
-    setBusy(true); onBusy(true); setError("");
+    if (!retry && pickup === "agendada" && chosen) {
+      setDay(activeDay);
+      setSlot(chosen.start);
+    }
+    setBusy(true);
+    onBusy(true);
+    setError("");
+
+    let request = retry;
+    let order: Order;
     try {
-      const draft = { customer: name.trim(), method, scenario, pickup, slot: pickup === "agendada" ? chosen.start : null, items: cart, total, campaign };
-      const requestKey = await checkoutRequestKey(draft);
-      onDone(await api<Order>("pedido", { ...draft, requestKey }));
+      if (!request) {
+        request = startCheckoutAttempt({
+          customer: name.trim(), method, scenario, pickup,
+          slot: pickup === "agendada" ? chosen?.start ?? null : null,
+          items: cart, total, campaign,
+        });
+      }
+      order = await api<Order>("pedido", request, AbortSignal.timeout(checkoutResponseTimeoutMs));
     } catch (problem) {
-      setError(errorMessage(problem));
-      await Promise.all([fetchSlots(), onChange()]);
-    } finally { sending.current = false; setBusy(false); onBusy(false); }
+      const rejected = problem instanceof ApiError && problem.status >= 400 && problem.status < 500
+        && problem.status !== 408 && problem.status !== 429;
+      if (request && !rejected) {
+        setRetry(request);
+      } else {
+        if (request) finishCheckoutAttempt(request.requestKey);
+        setRetry(null);
+        setError(errorMessage(problem));
+        await Promise.all([fetchSlots(), onChange()]);
+      }
+      sending.current = false;
+      setBusy(false);
+      onBusy(false);
+      return;
+    }
+
+    onDone(order);
+    finishCheckoutAttempt(request.requestKey);
+    onBusy(false);
   }
 
   return <form className="modal-form" onSubmit={submit}>
     <div className="modal-body form-stack checkout-body">
       <button type="button" className="inline-action back-action" onClick={onBack} disabled={busy}><ArrowLeft size={16} /> Voltar à sacola</button>
       <div className="notice demo-notice"><CreditCard size={21} /><div><strong>Checkout demonstrativo</strong><p>Simulador com Pix e cartão. Mercado Pago é a integração prevista. Use um apelido e detalhes de teste.</p></div></div>
-      <label className="field"><span>Nome ou apelido para retirada</span><input required minLength={2} maxLength={60} value={name} onChange={event => setName(event.target.value)} placeholder="Ex. Alex" autoComplete="off" /></label>
-      <fieldset><legend>Quando você quer retirar?</legend><div className="choice-grid pickup-choices">
+      <label className="field"><span>Nome ou apelido para retirada</span><input required minLength={2} maxLength={60} disabled={lockFields} value={name} onChange={event => setName(event.target.value)} placeholder="Ex. Alex" autoComplete="off" /></label>
+      <fieldset disabled={lockFields}><legend>Quando você quer retirar?</legend><div className="choice-grid pickup-choices">
         <label className="choice"><input type="radio" name="pickup" checked={pickup === "imediata"} onChange={() => setPickup("imediata")} /><span><strong><Clock3 size={16} /> Próxima vaga</strong><small>Retirada imediata</small></span></label>
         <label className="choice"><input type="radio" name="pickup" checked={pickup === "agendada"} onChange={() => setPickup("agendada")} /><span><strong><CalendarClock size={16} /> Agendar</strong><small>Escolha uma janela</small></span></label>
       </div></fieldset>
-      {loading ? <p className="muted" role="status">Buscando janelas de retirada…</p> :
+      {retry ? (retry.slot !== null && <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(retry.slot)} · {windowLabel(retry.slot)}</strong><small>Janela do envio anterior</small></div></div>) :
+        loading ? <p className="muted" role="status">Buscando janelas de retirada…</p> :
         paused ? <p className="notice">A Kombi pausou novos pedidos.</p> :
         scheduleError ? <p className="notice notice-error" role="alert">{scheduleError} <button type="button" className="inline-action" onClick={fetchSlots}>Recarregar horários</button></p> :
         !next ? <p className="notice">Nenhuma vaga disponível nos próximos sete dias.</p> :
         pickup === "imediata" ? <div className="estimate"><Clock3 size={18} /><div><strong>{dayLabel(next.start)} · {windowLabel(next.start)}</strong><small>Janela estimada para retirada · horário de São Paulo</small></div></div> :
         <>
           <div className="checkout-times">
-            <label className="field"><span>Dia da retirada</span><select value={activeDay} onChange={event => { setDay(event.target.value); setSlot(null); }}>
+            <label className="field"><span>Dia da retirada</span><select disabled={lockFields} value={activeDay} onChange={event => { setDay(event.target.value); setSlot(null); }}>
               {day && !days.some(([key]) => key === day) && <option value={day} disabled>Dia indisponível</option>}
               {days.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select></label>
-            <label className="field"><span>Janela de 15 minutos</span><select value={slot ?? activeSlot?.start ?? ""} onChange={event => { setDay(activeDay); setSlot(Number(event.target.value)); }}>
+            <label className="field"><span>Janela de 15 minutos</span><select disabled={lockFields} value={slot ?? activeSlot?.start ?? ""} onChange={event => { setDay(activeDay); setSlot(Number(event.target.value)); }}>
               {slot !== null && !activeSlot && <option value={slot} disabled>{windowLabel(slot)} · Indisponível</option>}
               {slot === null && !activeSlot && <option value="">Escolha outro dia</option>}
               {daySlots.map(s => <option key={s.start} value={s.start} disabled={!s.remaining}>{windowLabel(s.start)} · {s.remaining ? `${s.remaining} ${s.remaining === 1 ? "vaga" : "vagas"}` : "Lotado"}</option>)}
@@ -334,12 +370,13 @@ function Checkout({ cart, total, campaign, onBack, onBusy, onDone, onChange }: {
           {unavailableSlot && <p className="notice" role="status">A janela escolhida ficou indisponível. Selecione outro horário.</p>}
         </>}
       <div className="checkout-times">
-        <label className="field"><span>Forma de pagamento de teste</span><select value={method} onChange={event => setMethod(event.target.value as Method)}><option>Pix</option><option>Cartão</option></select></label>
-        <label className="field"><span>Resultado da simulação</span><select value={scenario} onChange={event => setScenario(event.target.value as Scenario)}>{(["aprovado", "pendente", "recusado", "expirado"] as const).map(p => <option value={p} key={p}>{payments[p]}</option>)}</select></label>
+        <label className="field"><span>Forma de pagamento de teste</span><select disabled={lockFields} value={method} onChange={event => setMethod(event.target.value as Method)}><option>Pix</option><option>Cartão</option></select></label>
+        <label className="field"><span>Resultado da simulação</span><select disabled={lockFields} value={scenario} onChange={event => setScenario(event.target.value as Scenario)}>{(["aprovado", "pendente", "recusado", "expirado"] as const).map(p => <option value={p} key={p}>{payments[p]}</option>)}</select></label>
       </div>
       {scenario === "pendente" && <p className="muted">A reserva de teste expira em cinco minutos. Você pode simular a aprovação na página do pedido.</p>}
+      {retry && <p className="notice" role="status">O envio anterior pode ter sido registrado. Reenvie para conferir o mesmo pedido.</p>}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
     </div>
-    <div className="modal-foot"><div className="summary"><span>Total de teste</span><strong>{money(total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || loading || paused || !!scheduleError || !chosen}>{busy ? "Registrando pedido…" : "Simular pedido"} <ArrowRight size={19} /></button></div>
+    <div className="modal-foot"><div className="summary"><span>Total de teste</span><strong>{money(retry?.total ?? total)}</strong></div><button type="submit" className="button button-primary full" disabled={busy || !canSend}>{busy ? "Registrando pedido…" : retry ? "Reenviar pedido" : "Simular pedido"} <ArrowRight size={19} /></button></div>
   </form>;
 }

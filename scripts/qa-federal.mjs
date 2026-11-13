@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { finishCheckoutAttempt, pendingCheckoutAttempt, startCheckoutAttempt } from "../lib/checkout-attempt.mjs";
 
 const { Miniflare } = createRequire(resolve("package.json"))("miniflare");
 const root=resolve("dist/server");
@@ -31,10 +32,19 @@ async function call(path, body, headers, status = 200) {
   assert.equal(response.status, status, path+" · "+JSON.stringify(data));
   return data;
 }
+function checkoutDraft(overrides = {}) {
+  return {
+    customer: "Teste Kombi", pickup: "imediata", slot: null, scenario: "aprovado", method: "Pix",
+    campaign: "federal-avdi", total: 3900, items: [{
+      key: "qa-cart-line", product: "dog-completo", variant: "2-salsichas",
+      press: "Prensado", extras: ["bacon"], quantity: 2, note: "Teste",
+    }],
+    ...overrides,
+  };
+}
+
 function order(overrides = {}) {
-  return { customer: "Teste Kombi", requestKey: crypto.randomUUID(), pickup: "imediata", scenario: "aprovado",
-    method: "Pix", campaign: "federal-avdi", total: 3900, items: [{ product: "dog-completo", variant: "2-salsichas",
-    press: "Prensado", extras: ["bacon"], quantity: 2, note: "Teste" }], ...overrides };
+  return { ...checkoutDraft(overrides), requestKey: crypto.randomUUID() };
 }
 try {
   const db = await worker.getD1Database("DB");
@@ -45,11 +55,13 @@ try {
   }
   await migrate(migrations[0]);
   const legacy = "1234567890abcdef1234567890abcdef";
+  const legacyKey = crypto.randomUUID();
   await db.prepare(`INSERT INTO orders
     (id,tracking,request_key,code,customer,slot,pickup,items,total,method,payment,stage,created_at,events)
-    VALUES ('legacy',?,'legacy-request','ABCDE','QA histórico',0,'imediata','[]',0,'Pix','recusado','cancelado',0,'[]')`).bind(legacy).run();
+    VALUES ('legacy',?,?,'ABCDE','QA histórico',0,'imediata','[]',3900,'Pix','recusado','cancelado',0,'[]')`).bind(legacy, legacyKey).run();
   for (const file of migrations.slice(1)) await migrate(file);
   assert.equal((await call("pedido/"+legacy)).payment, "recusado");
+  await call("pedido", { ...order({ customer: "QA histórico" }), requestKey: legacyKey }, undefined, 409);
   assert.equal((await call("avdi")).filter(item => item.photoStatus === "publicado").length, 0);
   const catalog = await call("loja");
   assert.equal(catalog.products.length, 38);
@@ -64,9 +76,55 @@ try {
   const { config } = await call("admin",undefined,operator);
   console.log("38 itens, preços, ingredientes, variantes, autorização e capacidade inicial");
 
-  const body = order();
-  const [a, duplicate] = await Promise.all([call("pedido",body),call("pedido",body)]);
-  assert.equal(a.id,duplicate.id); assert.equal(a.total,3900); assert.equal(a.items[0].unit,1950);
+  const draft = checkoutDraft();
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const storage = new Map();
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+    removeItem: key => storage.delete(key),
+  } });
+
+  const body = startCheckoutAttempt(draft);
+  assert.match(body.requestKey, /^[a-f0-9-]{36}$/);
+  const [a, duplicate] = await Promise.all([call("pedido", body), call("pedido", body)]);
+  assert.equal(a.id, duplicate.id);
+  assert.equal(a.tracking, duplicate.tracking);
+  assert.equal(a.total, 3900);
+  assert.equal(a.items[0].unit, 1950);
+
+  // Losing a successful response and reopening the checkout must recover the same request.
+  const reloaded = await import("../lib/checkout-attempt.mjs?reload");
+  const retry = reloaded.pendingCheckoutAttempt(structuredClone(draft.items));
+  assert.deepEqual(retry, body);
+  assert.equal((await call("pedido", retry)).id, a.id);
+  assert.equal(reloaded.pendingCheckoutAttempt([{ ...draft.items[0], quantity: 1 }]), null);
+  const beforeSecond = (await call("admin", undefined, operator)).orders;
+  assert.deepEqual(beforeSecond.map(order => order.id), [a.id]);
+
+  await call("pedido", { ...body, items: [{ ...body.items[0], note: "Dados diferentes" }] }, undefined, 409);
+  await call("pedido", { ...body, scenario: "recusado" }, undefined, 409);
+  finishCheckoutAttempt(body.requestKey);
+  assert.equal(pendingCheckoutAttempt(draft.items), null);
+  const cleared = await import("../lib/checkout-attempt.mjs?after-completion");
+  assert.equal(cleared.pendingCheckoutAttempt(draft.items), null);
+
+  // All order data, including the cart line key, stays identical in the next attempt.
+  const second = startCheckoutAttempt(draft);
+  assert.notEqual(second.requestKey, body.requestKey);
+  assert.deepEqual(second, { ...body, requestKey: second.requestKey });
+  const b = await call("pedido", second);
+  assert.notEqual(b.id, a.id);
+  assert.notEqual(b.tracking, a.tracking);
+  assert.deepEqual(b.items, a.items);
+  assert.equal(b.total, a.total);
+  assert.equal((await call("admin", undefined, operator)).orders.length, 2);
+  assert.equal((await call("pedido", second)).id, b.id);
+  finishCheckoutAttempt(second.requestKey);
+  if (previousStorage) Object.defineProperty(globalThis, "sessionStorage", previousStorage);
+  else delete globalThis.sessionStorage;
+  await call("admin/pedido/" + b.id, { action: "cancel" }, operator);
+  console.log("Tentativa: duplo clique, reenvio após recarregar, compra idêntica nova e conflitos 409");
   assert.match(a.code,/^[A-Z2-9]{5}$/);
   assert.equal(a.demo, true);
   assert.equal(a.campaign, undefined);
@@ -87,7 +145,7 @@ try {
   completedToken = a.tracking;
   assert.equal(delivered.code,undefined);
   const {metrics, history} = await call("admin",undefined,operator);
-  assert.equal(metrics.value,3900); assert.equal(metrics.top[0].quantity,2); assert.equal(history[0].events.length,4);
+  assert.equal(metrics.value,3900); assert.equal(metrics.top[0].quantity,2); assert.equal(history.find(order => order.id === a.id).events.length,4);
   await call("pedido/"+a.id,undefined,undefined,404);
   console.log("Pedido idempotente, preparo, código incorreto bloqueado, retirada confirmada e métricas");
 

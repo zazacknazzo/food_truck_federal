@@ -187,11 +187,11 @@ export async function createOrder(body: Record<string, unknown>) {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
   const requestHash = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
   function checkReplay(row: StoredOrder) {
-    // Older records had no request hash. Verify their immutable receipt fields.
-    const same = row.request_hash ? row.request_hash === requestHash
-      : row.customer === customer && row.method === method && row.pickup === pickup && row.total === body.total
-        && (pickup === "imediata" || row.slot === requestedSlot);
-    if (!same) throw new Problem(409, "Este envio já foi usado com outros dados. Confira a sacola.");
+    if (row.request_hash === null) {
+      // Orders from before the hash migration are still accessible by their tracking links.
+      throw new Problem(409, "Este envio já foi registrado. Consulte a confirmação em Meus pedidos.");
+    }
+    if (row.request_hash !== requestHash) throw new Problem(409, "Este envio já foi usado com outros dados. Confira a sacola.");
     return getOrder(row.tracking);
   }
   const findRequest = db.prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey);
