@@ -137,6 +137,35 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
 .sold-out .add-button { background: #e9ded0; color: var(--muted); }
 .full-menu { display: flex; justify-content: center; margin-top: 23px; }
 
+.partner-promo { margin-top: 18px; scroll-margin-top: 86px; }
+.partner-trigger {
+  display: flex;
+  width: min(100%, 420px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  min-height: 54px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-align: left;
+}
+.partner-trigger:hover { background: var(--oat); }
+.partner-label { display: grid; line-height: 1.25; }
+.partner-label small { font-size: 11px; color: var(--muted); }
+.partner-label strong { font-size: 15px; }
+.partner-action { display: inline-flex; align-items: center; gap: 4px; color: var(--wine); font-size: 13px; font-weight: 800; }
+.modal.partner-modal { width: min(880px, calc(100% - 28px)); }
+.partner-creative { padding: 0; background: #0c1114; color: #f3f8f6; }
+.partner-creative img { width: 100%; height: auto; }
+.partner-creative-copy { padding: 13px 16px 18px; }
+.partner-creative-copy strong { color: #99f2d0; font-size: 20px; }
+.partner-creative-copy p { margin-top: 3px; font-size: 14px; }
+@media (min-width: 541px) {
+  .partner-creative-copy { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; white-space: nowrap; }
+}
+
 .content-gap { padding-block: 62px 0; }
 .campaign { display: grid; grid-template-columns: 1fr 1fr; border-radius: 15px; background: var(--red); color: var(--cream); overflow: hidden; position: relative; }
 .campaign::after { content: ""; height: 10px; position: absolute; inset: auto 0 0; background: conic-gradient(var(--wine) 25%, var(--cream) 0 50%, var(--wine) 0 75%, var(--cream) 0) 0 0 / 10px 10px; }
@@ -514,6 +543,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); width: 1
   .mobile-cart .button span { margin-left: auto; font-size: 13px; }
   .toast { right: 12px; bottom: 76px; max-width: calc(100% - 24px); }
   .modal, .drawer, .checkout-modal { inset: auto 0 0; margin: 0; width: 100%; max-height: 93dvh; border-radius: 15px 15px 0 0; }
+  .modal.partner-modal { width: 100%; }
   .drawer { height: min(93dvh, 680px); }
   .modal-head { padding: 9px 12px 9px 15px; }
   .modal-head h2 { font-size: 32px; }

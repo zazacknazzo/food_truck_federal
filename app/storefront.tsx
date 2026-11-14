@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, CalendarClock, Check, ChevronDown, Clock3, CreditCard, MapPin,
+  ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, CalendarClock, Check, ChevronDown, ChevronRight, Clock3, CreditCard, MapPin,
   Minus, Plus, Search, ShoppingBag, TicketCheck, Trash2,
 } from "lucide-react";
 import {
@@ -15,7 +15,7 @@ import { Campaign, CategoryIcon, Empty, LocationLink, Modal, SiteFooter, SiteHea
 
 const cartKey = "federal-sacola-v1";
 const checkoutResponseTimeoutMs = 20_000;
-type Pane = "bag" | "checkout" | "product" | null;
+type Pane = "bag" | "checkout" | "product" | "partner" | null;
 
 export default function Home({ initialMode }: { initialMode: Mode }) {
   const [products, setProducts] = useState(originalProducts);
@@ -34,6 +34,7 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
   const [toast, setToast] = useState("");
   const [campaign, setCampaign] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const partnerTrigger = useRef<HTMLButtonElement>(null);
 
   async function syncStore() {
     try {
@@ -133,6 +134,13 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
         </div>
       </section>
 
+      <aside id="divulgacao-kerntech" className="container partner-promo" aria-label="Divulgação parceira">
+        <button ref={partnerTrigger} className="partner-trigger" type="button" aria-haspopup="dialog" onClick={() => setPane("partner")}>
+          <span className="partner-label"><small>Divulgação parceira</small><strong>kernTech</strong></span>
+          <span className="partner-action">Ver anúncio <ChevronRight size={17} aria-hidden="true" /></span>
+        </button>
+      </aside>
+
       <div className="container content-gap"><Campaign /></div>
 
       <section className="container pickup-section" id="como-funciona">
@@ -159,6 +167,19 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
     <SiteFooter mode={mode} commercial={commercial} />
     {count > 0 && <div className="mobile-cart"><button className="button button-primary" onClick={() => setPane("bag")}><ShoppingBag size={19} /> Ver sacola <span>{count} {count === 1 ? "item" : "itens"} · {money(total)}</span></button></div>}
     <div className={`toast ${toast ? "toast-visible" : ""}`} role="status">{toast && <><Check size={18} /> {toast}</>}</div>
+    {pane === "partner" && <Modal key="partner" title="kernTech" onClose={() => {
+      setPane(null);
+      requestAnimationFrame(() => partnerTrigger.current?.focus({ preventScroll: true }));
+    }} kind="partner-modal">
+      <figure className="modal-body partner-creative">
+        {/* eslint-disable-next-line @next/next/no-img-element -- The optimized WebP is mounted only after opening the announcement. */}
+        <img src="/media/kerntech-anuncio.webp" alt="Equipe da kernTech" width="1600" height="900" decoding="async" />
+        <figcaption className="partner-creative-copy">
+          <strong>A TI por trás do seu negócio.</strong>
+          <p>Suporte em TI, redes e segurança para empresas.</p>
+        </figcaption>
+      </figure>
+    </Modal>}
     {pane === "product" && current && <Modal key="product" title={current.nome} onClose={() => setPane(returnToBag ? "bag" : null)} kind="product-modal">
       <ProductForm product={current} products={products} initial={editing} onSave={addLine} />
     </Modal>}
