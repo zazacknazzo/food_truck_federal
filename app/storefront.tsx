@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown, ArrowDownRight, ArrowLeft, ArrowRight, CalendarClock, Check, ChevronDown, ChevronRight, Clock3, CreditCard, MapPin,
-  Minus, Plus, Search, ShoppingBag, TicketCheck, Trash2,
+  Minus, Plus, Search, ShoppingBag, TicketCheck, Trash2, X,
 } from "lucide-react";
 import {
   type CartLine, type CommercialInfo, type Method, type Mode, type Order, type Pickup, type Product, type Scenario, type Slot,
@@ -14,6 +14,7 @@ import { finishCheckoutAttempt, pendingCheckoutAttempt, startCheckoutAttempt, ty
 import { Campaign, CategoryIcon, Empty, LocationLink, Modal, SiteFooter, SiteHeader } from "./site-ui";
 
 const cartKey = "federal-sacola-v1";
+const partnerSeenKey = "federal-kerntech-visto";
 const checkoutResponseTimeoutMs = 20_000;
 type Pane = "bag" | "checkout" | "product" | "partner" | null;
 
@@ -34,7 +35,11 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
   const [toast, setToast] = useState("");
   const [campaign, setCampaign] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [partnerNotice, setPartnerNotice] = useState(false);
   const partnerTrigger = useRef<HTMLButtonElement>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
+  const catalogClicks = useRef(0);
+  const partnerSeen = useRef(false);
 
   async function syncStore() {
     try {
@@ -67,7 +72,9 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
   const unavailable = cart.some(line => products.find(p => p.id === line.product)?.disponivel === false || line.extras.some(id => products.find(p => p.id === id)?.disponivel === false));
 
   function changeCart(next: CartLine[]) { setCart(next); writeLocal(cartKey, next); }
+  function openBag() { setPartnerNotice(false); setPane("bag"); }
   function selectProduct(product: Product, item: CartLine | null = null) {
+    setPartnerNotice(false);
     setSelected(product); setEditing(item); setReturnToBag(pane === "bag"); setPane("product");
   }
   function addLine(item: CartLine) {
@@ -90,9 +97,35 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
   const suggestion = products.find(p => p.id === "refrigerante-lata" && p.disponivel !== false);
   function closePane() { if (!submitting) setPane(null); }
 
+  function rememberPartner() {
+    partnerSeen.current = true;
+    try { sessionStorage.setItem(partnerSeenKey, "1"); } catch { /* Keep the limit for this page if storage is disabled. */ }
+  }
+  function browseCatalog() {
+    setPartnerNotice(false);
+    if (pane || count > 0 || partnerSeen.current || ++catalogClicks.current < 3) return;
+    try {
+      if (sessionStorage.getItem(partnerSeenKey) === "1") {
+        partnerSeen.current = true;
+        return;
+      }
+    } catch { /* The in-page limit still applies. */ }
+    rememberPartner();
+    setPartnerNotice(true);
+  }
+  function openPartner(trigger: HTMLButtonElement) {
+    partnerTrigger.current = trigger;
+    rememberPartner();
+    setPane("partner");
+  }
+  function dismissPartnerNotice() {
+    setPartnerNotice(false);
+    resultHeading.current?.focus({ preventScroll: true });
+  }
+
   return <>
     <a className="skip" href="#cardapio">Ir ao cardápio</a>
-    <SiteHeader bag={count} onBag={() => setPane("bag")} mode={mode} home />
+    <SiteHeader bag={count} onBag={openBag} mode={mode} home />
     <main>
       <section className="container hero" aria-labelledby="hero-title">
         <div className="hero-copy">
@@ -100,7 +133,7 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
           <h1 id="hero-title">Seu lanche<br />favorito.<br /><em>Sem fila.</em></h1>
           <p>Dogões, hambúrgueres e porções da Kombi vermelha. Monte o seu lanche e escolha quando passar para buscar.</p>
           <div className="button-row hero-actions">
-            <a className="button button-primary" href="#cardapio">Ver cardápio <ArrowDownRight size={21} /></a>
+            <a className="button button-primary" href="#cardapio" onClick={browseCatalog}>Ver cardápio <ArrowDownRight size={21} /></a>
             <a className="button button-quiet" href="#como-funciona">Como funciona <ArrowDown size={17} /></a>
           </div>
         </div>
@@ -116,26 +149,34 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
         <div className="container">
           <div className="menu-head">
             <div><span className="eyebrow">Cardápio</span><h2>Da Kombi pra você.</h2></div>
-            <label className="search"><Search size={21} /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar no cardápio" aria-label="Buscar no cardápio" /></label>
+            <label className="search"><Search size={21} /><input type="search" value={query} onChange={event => { setQuery(event.target.value); setPartnerNotice(false); }} placeholder="Buscar no cardápio" aria-label="Buscar no cardápio" /></label>
           </div>
           <div className="category-list" aria-label="Categorias do cardápio">
             {[{ id: "todos", nome: "Tudo" }, ...categories].map(c => <button key={c.id} type="button" aria-pressed={category === c.id}
-              onClick={() => { setCategory(c.id); setAll(true); }} className={`category-pill ${category === c.id ? "active" : ""}`}>
+              onClick={() => { if (category !== c.id || !all) browseCatalog(); setCategory(c.id); setAll(true); }} className={`category-pill ${category === c.id ? "active" : ""}`}>
               <CategoryIcon category={c.id} size={18} /> {c.nome}
             </button>)}
           </div>
           {paused && <p className="notice" role="status">Pedidos pausados. O cardápio continua disponível para consulta.</p>}
           {loadError && <p className="notice" role="status">{loadError} <button className="inline-action" onClick={syncStore}>Tentar novamente</button></p>}
-          <div className="result-head"><h3>{isFeatured ? "Destaques" : category === "todos" ? "Todos os itens" : categories.find(c => c.id === category)?.nome}</h3><span aria-live="polite">{isFeatured ? "38 itens no cardápio" : `${result.length} ${result.length === 1 ? "item" : "itens"}`}</span></div>
+          {partnerNotice && <aside className="partner-notice" aria-label="Divulgação da kernTech">
+            <button className="partner-notice-open" type="button" aria-haspopup="dialog" aria-label="Ver anúncio da kernTech" onClick={event => openPartner(event.currentTarget)}>
+              <span className="partner-notice-photo" aria-hidden="true" />
+              <span className="partner-label"><small>Divulgação parceira</small><strong>kernTech</strong><span className="partner-notice-copy">Suporte em TI, redes e segurança.</span></span>
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+            <button className="icon-button" type="button" aria-label="Dispensar divulgação" onClick={dismissPartnerNotice}><X size={18} aria-hidden="true" /></button>
+          </aside>}
+          <div className="result-head"><h3 ref={resultHeading} tabIndex={-1}>{isFeatured ? "Destaques" : category === "todos" ? "Todos os itens" : categories.find(c => c.id === category)?.nome}</h3><span aria-live="polite">{isFeatured ? "38 itens no cardápio" : `${result.length} ${result.length === 1 ? "item" : "itens"}`}</span></div>
           {result.length ? <div className="product-grid">{result.map(product =>
             <ProductCard key={product.id} product={product} onSelect={() => selectProduct(product)} />
           )}</div> : <Empty title="Nenhum item encontrado">Tente outro nome, ingrediente ou categoria.</Empty>}
-          {isFeatured && <div className="full-menu"><button className="button button-outline" onClick={() => setAll(true)}>Ver todos os 38 itens <ChevronDown size={18} /></button></div>}
+          {isFeatured && <div className="full-menu"><button className="button button-outline" onClick={() => { setAll(true); browseCatalog(); }}>Ver todos os 38 itens <ChevronDown size={18} /></button></div>}
         </div>
       </section>
 
       <aside id="divulgacao-kerntech" className="container partner-promo" aria-label="Divulgação parceira">
-        <button ref={partnerTrigger} className="partner-trigger" type="button" aria-haspopup="dialog" onClick={() => setPane("partner")}>
+        <button className="partner-trigger" type="button" aria-haspopup="dialog" onClick={event => openPartner(event.currentTarget)}>
           <span className="partner-label"><small>Divulgação parceira</small><strong>kernTech</strong></span>
           <span className="partner-action">Ver anúncio <ChevronRight size={17} aria-hidden="true" /></span>
         </button>
@@ -165,7 +206,7 @@ export default function Home({ initialMode }: { initialMode: Mode }) {
       </section>
     </main>
     <SiteFooter mode={mode} commercial={commercial} />
-    {count > 0 && <div className="mobile-cart"><button className="button button-primary" onClick={() => setPane("bag")}><ShoppingBag size={19} /> Ver sacola <span>{count} {count === 1 ? "item" : "itens"} · {money(total)}</span></button></div>}
+    {count > 0 && <div className="mobile-cart"><button className="button button-primary" onClick={openBag}><ShoppingBag size={19} /> Ver sacola <span>{count} {count === 1 ? "item" : "itens"} · {money(total)}</span></button></div>}
     <div className={`toast ${toast ? "toast-visible" : ""}`} role="status">{toast && <><Check size={18} /> {toast}</>}</div>
     {pane === "partner" && <Modal key="partner" title="kernTech" onClose={() => {
       setPane(null);
